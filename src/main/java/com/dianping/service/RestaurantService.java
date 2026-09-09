@@ -1,6 +1,7 @@
 package com.dianping.service;
 
 import com.dianping.common.PageResult;
+import com.dianping.dto.UpdateRestaurantDTO;
 import com.dianping.entity.Restaurant;
 import com.dianping.exception.BusinessException;
 import com.dianping.mapper.RestaurantMapper;
@@ -125,5 +126,43 @@ public class RestaurantService {
         result.setRecords(records);
 
         return result;
+    }
+
+    public void updateRestaurant(
+            Long restaurantId,
+            UpdateRestaurantDTO dto) {
+
+        int rows = restaurantMapper.updateRestaurant(
+                restaurantId,
+                dto.getName(),
+                dto.getDescription(),
+                dto.getAddress()
+        );
+
+        if (rows == 0) {
+            throw new BusinessException("餐厅不存在");
+        }
+    }
+
+    public void updateRestaurantStatus(
+            Long restaurantId,
+            Integer status) {
+
+        if (status != 0 && status != 1) {
+            throw new BusinessException(
+                    "餐厅状态只能是0或1"
+            );
+        }
+
+        int rows = restaurantMapper.updateStatus(
+                restaurantId,
+                status
+        );
+
+        if (rows == 0) {
+            throw new BusinessException(
+                    "餐厅不存在"
+            );
+        }
     }
 }

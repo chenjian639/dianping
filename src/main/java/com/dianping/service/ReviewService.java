@@ -4,9 +4,11 @@ import com.dianping.common.PageResult;
 import com.dianping.dto.CreateReviewDTO;
 import com.dianping.entity.Order;
 import com.dianping.entity.Review;
+import com.dianping.enums.OrderStatus;
 import com.dianping.exception.BusinessException;
 import com.dianping.mapper.OrderMapper;
 import com.dianping.mapper.ReviewMapper;
+import com.dianping.vo.MyReviewVO;
 import com.dianping.vo.RestaurantReviewSummaryVO;
 import com.dianping.vo.ReviewVO;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -33,7 +35,8 @@ public class ReviewService {
         Order order =
                 orderMapper.selectCompletedOrderByUser(
                         dto.getOrderId(),
-                        userId
+                        userId,
+                        OrderStatus.COMPLETED.getCode()
                 );
 
         if (order == null) {
@@ -131,5 +134,41 @@ public class ReviewService {
         vo.setReviewCount(reviewCount);
 
         return vo;
+    }
+
+    public PageResult<MyReviewVO> getMyReviews(
+            Long userId,
+            Integer page,
+            Integer pageSize) {
+
+        if (page < 1) {
+            throw new BusinessException("page不能小于1");
+        }
+
+        if (pageSize < 1 || pageSize > 100) {
+            throw new BusinessException(
+                    "pageSize必须在1到100之间"
+            );
+        }
+
+        int offset = (page - 1) * pageSize;
+
+        List<MyReviewVO> records =
+                reviewMapper.selectMyReviewsPage(
+                        userId,
+                        offset,
+                        pageSize
+                );
+
+        Long total =
+                reviewMapper.countMyReviews(userId);
+
+        PageResult<MyReviewVO> result =
+                new PageResult<>();
+
+        result.setTotal(total);
+        result.setRecords(records);
+
+        return result;
     }
 }

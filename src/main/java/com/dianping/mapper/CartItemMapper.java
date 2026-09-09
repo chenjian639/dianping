@@ -24,11 +24,16 @@ public interface CartItemMapper {
     int insert(CartItem cartItem);
 
     @Update("""
-        UPDATE cart_item
-        SET quantity = #{quantity}
-        WHERE id = #{id}
-        """)
-    int updateQuantity(CartItem cartItem);
+    UPDATE cart_item
+    SET quantity = #{quantity}
+    WHERE id = #{cartItemId}
+      AND user_id = #{userId}
+    """)
+    int updateQuantity(
+            Long cartItemId,
+            Long userId,
+            Integer quantity
+    );
 
     @Select("""
         SELECT
@@ -43,14 +48,6 @@ public interface CartItemMapper {
     """)
     List<CartItemVO> selectCartByUserId(Long userId);
 
-    @Update("""
-        UPDATE cart_item
-        SET quantity = #{quantity}
-        WHERE id = #{id}
-          AND user_id = #{userId}
-        """)
-    int updateQuantityById(Long id, Long userId, Integer quantity);
-
     @Delete("""
         DELETE FROM cart_item
         WHERE id = #{id}
@@ -63,4 +60,23 @@ public interface CartItemMapper {
         WHERE user_id = #{userId}
         """)
     int deleteByUserId(Long userId);
+
+    @Select("""
+    SELECT DISTINCT d.restaurant_id
+    FROM cart_item c
+    JOIN dish d ON c.dish_id = d.id
+    WHERE c.user_id = #{userId}
+    """)
+    List<Long> selectRestaurantIdsByUserId(Long userId);
+
+    @Select("""
+    SELECT *
+    FROM cart_item
+    WHERE id = #{cartItemId}
+      AND user_id = #{userId}
+    """)
+    CartItem selectByIdAndUserId(
+            Long cartItemId,
+            Long userId
+    );
 }

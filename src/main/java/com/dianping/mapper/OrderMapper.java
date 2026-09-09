@@ -54,22 +54,32 @@ public interface OrderMapper {
     Order selectByIdAndUserId(Long orderId, Long userId);
 
     @Update("""
-            UPDATE orders
-            SET status = 1
-            WHERE id = #{orderId}
-              AND user_id = #{userId}
-              AND status = 0
-            """)
-    int payOrder(Long orderId, Long userId);
+    UPDATE orders
+    SET status = #{newStatus}
+    WHERE id = #{orderId}
+      AND user_id = #{userId}
+      AND status = #{currentStatus}
+    """)
+    int payOrder(
+            Long orderId,
+            Long userId,
+            Integer currentStatus,
+            Integer newStatus
+    );
 
     @Update("""
-            UPDATE orders
-            SET status = 5
-            WHERE id = #{orderId}
-              AND user_id = #{userId}
-              AND status = 0
-            """)
-    int cancelOrder(Long orderId, Long userId);
+    UPDATE orders
+    SET status = #{newStatus}
+    WHERE id = #{orderId}
+      AND user_id = #{userId}
+      AND status = #{currentStatus}
+    """)
+    int cancelOrder(
+            Long orderId,
+            Long userId,
+            Integer currentStatus,
+            Integer newStatus
+    );
 
     @Update("""
             UPDATE orders
@@ -143,10 +153,11 @@ public interface OrderMapper {
             FROM orders
             WHERE id = #{orderId}
               AND user_id = #{userId}
-              AND status = 4
+              AND status = #{status}
             """)
     Order selectCompletedOrderByUser(
             Long orderId,
-            Long userId
+            Long userId,
+            Integer status
     );
 }

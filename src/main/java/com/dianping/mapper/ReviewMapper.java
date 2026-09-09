@@ -1,6 +1,7 @@
 package com.dianping.mapper;
 
 import com.dianping.entity.Review;
+import com.dianping.vo.MyReviewVO;
 import com.dianping.vo.ReviewVO;
 import org.apache.ibatis.annotations.*;
 
@@ -76,4 +77,34 @@ public interface ReviewMapper {
     WHERE restaurant_id = #{restaurantId}
     """)
     Long getReviewCount(Long restaurantId);
+
+    @Select("""
+    SELECT
+        rv.id,
+        rv.order_id AS orderId,
+        rv.restaurant_id AS restaurantId,
+        r.name AS restaurantName,
+        rv.rating,
+        rv.content,
+        rv.created_at AS createdAt
+    FROM review rv
+    JOIN restaurant r
+        ON rv.restaurant_id = r.id
+    WHERE rv.user_id = #{userId}
+    ORDER BY rv.created_at DESC
+    LIMIT #{pageSize}
+    OFFSET #{offset}
+    """)
+    List<MyReviewVO> selectMyReviewsPage(
+            Long userId,
+            Integer offset,
+            Integer pageSize
+    );
+
+    @Select("""
+    SELECT COUNT(*)
+    FROM review
+    WHERE user_id = #{userId}
+    """)
+    Long countMyReviews(Long userId);
 }

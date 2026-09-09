@@ -2,6 +2,7 @@ package com.dianping.service;
 
 import com.dianping.common.PageResult;
 import com.dianping.entity.*;
+import com.dianping.enums.OrderStatus;
 import com.dianping.exception.BusinessException;
 import com.dianping.mapper.*;
 import com.dianping.vo.CartItemVO;
@@ -157,7 +158,12 @@ public class OrderService {
 
     public void payOrder(Long userId, Long orderId) {
 
-        int rows = orderMapper.payOrder(orderId, userId);
+        int rows = orderMapper.payOrder(
+                orderId,
+                userId,
+                OrderStatus.PENDING_PAYMENT.getCode(),
+                OrderStatus.PAID.getCode()
+        );
 
         if (rows == 0) {
             throw new BusinessException("订单不存在或当前状态无法支付");
@@ -167,8 +173,12 @@ public class OrderService {
     @Transactional
     public void cancelOrder(Long userId, Long orderId) {
 
-        // 1. 先把订单从 0 改成 5
-        int rows = orderMapper.cancelOrder(orderId, userId);
+        int rows = orderMapper.cancelOrder(
+                orderId,
+                userId,
+                OrderStatus.PENDING_PAYMENT.getCode(),
+                OrderStatus.CANCELED.getCode()
+        );
 
         if (rows == 0) {
             throw new BusinessException("订单不存在或当前状态无法取消");
@@ -192,8 +202,8 @@ public class OrderService {
         int rows = orderMapper.updateStatusByRestaurant(
                 orderId,
                 restaurantId,
-                1,
-                2
+                OrderStatus.PAID.getCode(),
+                OrderStatus.PREPARING.getCode()
         );
 
         if (rows == 0) {
@@ -206,8 +216,8 @@ public class OrderService {
         int rows = orderMapper.updateStatusByRestaurant(
                 orderId,
                 restaurantId,
-                2,
-                3
+                OrderStatus.PREPARING.getCode(),
+                OrderStatus.DELIVERING.getCode()
         );
 
         if (rows == 0) {
@@ -220,8 +230,8 @@ public class OrderService {
         int rows = orderMapper.updateStatusByRestaurant(
                 orderId,
                 restaurantId,
-                3,
-                4
+                OrderStatus.DELIVERING.getCode(),
+                OrderStatus.COMPLETED.getCode()
         );
 
         if (rows == 0) {

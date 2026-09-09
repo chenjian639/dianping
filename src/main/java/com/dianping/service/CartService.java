@@ -1,6 +1,7 @@
 package com.dianping.service;
 
 import com.dianping.dto.AddCartItemDTO;
+import com.dianping.dto.UpdateCartItemDTO;
 import com.dianping.entity.CartItem;
 import com.dianping.entity.Dish;
 import com.dianping.exception.BusinessException;
@@ -33,6 +34,23 @@ public class CartService {
             throw new BusinessException("菜品已下架");
         }
 
+        List<Long> restaurantIds =
+                cartItemMapper.selectRestaurantIdsByUserId(userId);
+
+        if (!restaurantIds.isEmpty()) {
+
+            Long cartRestaurantId =
+                    restaurantIds.get(0);
+
+            if (!cartRestaurantId.equals(
+                    dish.getRestaurantId())) {
+
+                throw new BusinessException(
+                        "购物车中已有其他餐厅的菜品，请先清空购物车"
+                );
+            }
+        }
+
         CartItem cartItem =
                 cartItemMapper.selectByUserIdAndDishId(
                         userId,
@@ -53,9 +71,12 @@ public class CartService {
             int newQuantity =
                     cartItem.getQuantity() + dto.getQuantity();
 
+            if (newQuantity > dish.getStock()) {
+                throw new BusinessException("购物车数量超过菜品库存");
+            }
             cartItem.setQuantity(newQuantity);
 
-            cartItemMapper.updateQuantity(cartItem);
+            cartItemMapper.updateQuantity(cartItem.getId(),userId,newQuantity);
         }
     }
     public List<CartItemVO> getCart(Long userId) {
@@ -67,7 +88,7 @@ public class CartService {
             Long cartItemId,
             Integer quantity) {
 
-        int rows = cartItemMapper.updateQuantityById(
+        int rows = cartItemMapper.updateQuantity(
                 cartItemId,
                 userId,
                 quantity
@@ -87,6 +108,60 @@ public class CartService {
 
         if (rows == 0) {
             throw new BusinessException("购物车记录不存在");
+        }
+    }
+
+    public void updateCartItem(
+            Long userId,
+            Long cartItemId,
+            UpdateCartItemDTO dto) {
+
+        CartItem cartItem =
+                cartItemMapper.selectByIdAndUserId(
+                        cartItemId,
+                        userId
+                );
+
+        if (cartItem == null) {
+            throw new BusinessException(
+                    "购物车项不存在或无权限修改"
+            );
+        }
+
+        Dish dish =
+                dishMapper.selectById(
+                        cartItem.getDishId()
+                );
+
+        if (dish == null) {
+            throw new BusinessException(
+                    "菜品不存在"
+            );
+        }
+
+        if (dish.getStatus() != 1) {
+            throw new BusinessException(
+                    "菜品已下架"
+            );
+        }
+
+        if (dto.getQuantity() > dish.getStock()) {
+            throw new BusinessException(
+                    "购物车数量超过菜品库存"
+            );
+        }
+
+        int rows =
+                cartItemMapper.updateQuantity(
+                        cartItemId,
+                        userId,
+                        dto.getQuantity()
+                );
+
+        if (rows == 0) {
+            throw new BusinessException(
+                    "购物车项不存在或无权限修改"
+            );
         }
     }
 }
