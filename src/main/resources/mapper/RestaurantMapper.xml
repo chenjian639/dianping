@@ -1,0 +1,55 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<!DOCTYPE mapper
+        PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+        "https://mybatis.org/dtd/mybatis-3-mapper.dtd">
+
+<mapper namespace="com.dianping.mapper.RestaurantMapper">
+
+    <select id="searchByKeywordPage"
+            resultType="com.dianping.vo.RestaurantSearchVO">
+
+        SELECT
+        r.id,
+        r.name,
+        r.description,
+        r.address,
+        COALESCE(ROUND(AVG(rv.rating), 1), 0) AS averageRating,
+        COUNT(rv.id) AS reviewCount
+
+        FROM restaurant r
+
+        LEFT JOIN review rv
+        ON r.id = rv.restaurant_id
+
+        WHERE r.status = 1
+        AND r.name LIKE CONCAT('%', #{keyword}, '%')
+
+        GROUP BY
+        r.id,
+        r.name,
+        r.description,
+        r.address,
+        r.created_at
+
+        <choose>
+
+            <when test="sort == 'rating'">
+                ORDER BY averageRating DESC, r.id DESC
+            </when>
+
+            <when test="sort == 'reviews'">
+                ORDER BY reviewCount DESC, r.id DESC
+            </when>
+
+            <otherwise>
+                ORDER BY r.created_at DESC, r.id DESC
+            </otherwise>
+
+        </choose>
+
+        LIMIT #{pageSize}
+        OFFSET #{offset}
+
+    </select>
+
+</mapper>

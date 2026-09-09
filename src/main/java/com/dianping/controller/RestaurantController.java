@@ -7,7 +7,9 @@ import com.dianping.entity.Restaurant;
 import com.dianping.service.DishService;
 import com.dianping.service.RestaurantService;
 import com.dianping.service.ReviewService;
+import com.dianping.vo.RestaurantDetailVO;
 import com.dianping.vo.RestaurantReviewSummaryVO;
+import com.dianping.vo.RestaurantSearchVO;
 import com.dianping.vo.ReviewVO;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.web.bind.annotation.*;
@@ -30,8 +32,12 @@ public class RestaurantController {
     }
 
     @GetMapping("/{id}")
-    public Result<Restaurant> getById(@PathVariable Long id) {
-        return Result.success(restaurantService.findById(id));
+    public Result<RestaurantDetailVO> getRestaurantById(
+            @PathVariable Long id) {
+
+        return Result.success(
+                restaurantService.getRestaurantDetail(id)
+        );
     }
 
     @GetMapping("/{id}/dishes")
@@ -60,6 +66,30 @@ public class RestaurantController {
 
         return Result.success(
                 reviewService.getRestaurantReviewSummary(id)
+        );
+    }
+
+    @GetMapping("/search")
+    public Result<PageResult<RestaurantSearchVO>> searchRestaurants(
+            @RequestParam(required = false)
+            String keyword,
+
+            @RequestParam(defaultValue = "latest")
+            String sort,
+
+            @RequestParam(defaultValue = "1")
+            Integer page,
+
+            @RequestParam(defaultValue = "10")
+            Integer pageSize) {
+
+        return Result.success(
+                restaurantService.searchRestaurants(
+                        keyword,
+                        sort,
+                        page,
+                        pageSize
+                )
         );
     }
 }
