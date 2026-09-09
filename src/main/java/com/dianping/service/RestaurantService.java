@@ -32,27 +32,4 @@ public class RestaurantService {
 
         return restaurant;
     }
-
-    public RestaurantReviewSummaryVO getRestaurantReviewSummary(
-            Long restaurantId) {
-
-        BigDecimal averageRating =
-                reviewMapper.getAverageRating(restaurantId);
-
-        Long reviewCount =
-                reviewMapper.getReviewCount(restaurantId);
-
-        RestaurantReviewSummaryVO vo =
-                new RestaurantReviewSummaryVO();
-
-        // 如果完全没有评价，AVG 会返回 null
-        if (averageRating == null) {
-            averageRating = BigDecimal.ZERO;
-        }
-
-        vo.setAverageRating(averageRating);
-        vo.setReviewCount(reviewCount);
-
-        return vo;
-    }
 }

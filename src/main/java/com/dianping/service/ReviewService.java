@@ -7,10 +7,13 @@ import com.dianping.entity.Review;
 import com.dianping.exception.BusinessException;
 import com.dianping.mapper.OrderMapper;
 import com.dianping.mapper.ReviewMapper;
+import com.dianping.vo.RestaurantReviewSummaryVO;
 import com.dianping.vo.ReviewVO;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 
+import java.math.BigDecimal;
+import java.math.RoundingMode;
 import java.util.List;
 
 @Service
@@ -99,5 +102,34 @@ public class ReviewService {
         result.setRecords(records);
 
         return result;
+    }
+
+    public RestaurantReviewSummaryVO getRestaurantReviewSummary(
+            Long restaurantId) {
+
+        BigDecimal averageRating =
+                reviewMapper.getAverageRating(restaurantId);
+
+        Long reviewCount =
+                reviewMapper.getReviewCount(restaurantId);
+
+        RestaurantReviewSummaryVO vo =
+                new RestaurantReviewSummaryVO();
+
+        // 如果完全没有评价，AVG 会返回 null
+        if (averageRating == null) {
+            averageRating = BigDecimal.ZERO;
+        } else {
+            averageRating =
+                    averageRating.setScale(
+                            1,
+                            RoundingMode.HALF_UP
+                    );
+        }
+
+        vo.setAverageRating(averageRating);
+        vo.setReviewCount(reviewCount);
+
+        return vo;
     }
 }
