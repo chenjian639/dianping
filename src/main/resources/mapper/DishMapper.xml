@@ -1,0 +1,40 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<!DOCTYPE mapper
+        PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+        "https://mybatis.org/dtd/mybatis-3-mapper.dtd">
+
+<mapper namespace="com.dianping.mapper.DishMapper">
+
+    <select id="selectMerchantDishesPage"
+            resultType="com.dianping.entity.Dish">
+
+        SELECT *
+        FROM dish
+        WHERE restaurant_id = #{restaurantId}
+        AND deleted = 0
+
+        <if test="status != null">
+            AND status = #{status}
+        </if>
+
+        ORDER BY created_at DESC
+        LIMIT #{pageSize}
+        OFFSET #{offset}
+
+    </select>
+
+    <select id="countMerchantDishes"
+            resultType="java.lang.Long">
+
+        SELECT COUNT(*)
+        FROM dish
+        WHERE restaurant_id = #{restaurantId}
+        AND deleted = 0
+
+        <if test="status != null">
+            AND status = #{status}
+        </if>
+
+    </select>
+
+</mapper>
