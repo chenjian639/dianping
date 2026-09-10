@@ -10,6 +10,10 @@ import org.springframework.web.servlet.HandlerInterceptor;
 
 @Component
 public class LoginInterceptor implements HandlerInterceptor {
+    private final JwtUtil jwtUtil;
+    public LoginInterceptor(JwtUtil jwtUtil) {
+        this.jwtUtil = jwtUtil;
+    }
 
     @Override
     public boolean preHandle(
@@ -35,7 +39,7 @@ public class LoginInterceptor implements HandlerInterceptor {
         String token = authorization.substring(7);
 
         try {
-            Claims claims = JwtUtil.parseToken(token);
+            Claims claims = jwtUtil.parseToken(token);
 
             Long userId = Long.valueOf(claims.getSubject());
             request.setAttribute("userId", userId);

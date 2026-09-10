@@ -12,6 +12,7 @@ import com.dianping.vo.MyReviewVO;
 import com.dianping.vo.RestaurantReviewSummaryVO;
 import com.dianping.vo.ReviewVO;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.stereotype.Service;
 
 import java.math.BigDecimal;
@@ -26,6 +27,9 @@ public class ReviewService {
 
     @Autowired
     private OrderMapper orderMapper;
+
+    @Autowired
+    private StringRedisTemplate stringRedisTemplate;
 
     public Long createReview(
             Long userId,
@@ -69,7 +73,9 @@ public class ReviewService {
 
         // 4. 写数据库
         reviewMapper.insert(review);
+        String key = "restaurant:detail:" + order.getRestaurantId();
 
+        stringRedisTemplate.delete(key);
         return review.getId();
     }
 

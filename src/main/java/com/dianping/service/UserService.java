@@ -8,17 +8,24 @@ import com.dianping.mapper.UserMapper;
 import com.dianping.util.JwtUtil;
 import com.dianping.vo.LoginVO;
 import com.dianping.vo.UserVO;
-import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
+import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
 
 @Service
 public class UserService {
-    @Autowired
-    private UserMapper userMapper;
-    @Autowired
-    private BCryptPasswordEncoder passwordEncoder;
+    private final UserMapper userMapper;
+    private final PasswordEncoder passwordEncoder;
+    private final JwtUtil jwtUtil;
 
+    public UserService(
+            UserMapper userMapper,
+            PasswordEncoder passwordEncoder,
+            JwtUtil jwtUtil) {
+
+        this.userMapper = userMapper;
+        this.passwordEncoder = passwordEncoder;
+        this.jwtUtil = jwtUtil;
+    }
     public UserVO findUserById(Long id){
         User user = userMapper.selectById(id);
 
@@ -75,7 +82,7 @@ public class UserService {
         userVO.setNickname(user.getNickname());
         userVO.setPhone(user.getPhone());
 
-        String token = JwtUtil.generateToken(
+        String token = jwtUtil.generateToken(
                 user.getId(),
                 user.getUsername(),
                 user.getRole(),

@@ -7,6 +7,7 @@ import com.dianping.exception.BusinessException;
 import com.dianping.mapper.*;
 import com.dianping.vo.CartItemVO;
 import com.dianping.vo.OrderDetailVO;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -14,6 +15,7 @@ import org.springframework.transaction.annotation.Transactional;
 import java.math.BigDecimal;
 import java.util.List;
 
+@Slf4j
 @Service
 public class OrderService {
 
@@ -105,6 +107,13 @@ public class OrderService {
         }
 
         cartItemMapper.deleteByUserId(userId);
+        log.info(
+                "订单创建成功, orderId={}, userId={}, restaurantId={}, totalAmount={}",
+                order.getId(),
+                userId,
+                order.getRestaurantId(),
+                order.getTotalAmount()
+        );
 
         return order.getId();
     }
@@ -168,6 +177,12 @@ public class OrderService {
         if (rows == 0) {
             throw new BusinessException("订单不存在或当前状态无法支付");
         }
+
+        log.info(
+                "订单支付成功, orderId={}, userId={}",
+                orderId,
+                userId
+        );
     }
 
     @Transactional
@@ -195,6 +210,11 @@ public class OrderService {
                     item.getQuantity()
             );
         }
+        log.info(
+                "订单取消成功, orderId={}, userId={}",
+                orderId,
+                userId
+        );
     }
 
     public void startPreparing(Long orderId,Long restaurantId) {
@@ -235,6 +255,10 @@ public class OrderService {
         );
 
         if (rows == 0) {
+            log.warn(
+                    "订单支付失败, orderId={}, 原因=订单不存在或状态不允许",
+                    orderId
+            );
             throw new BusinessException("订单不存在或当前状态无法完成");
         }
     }
@@ -298,4 +322,6 @@ public class OrderService {
 
         return vo;
     }
+
+
 }

@@ -3,43 +3,73 @@ package com.dianping.util;
 import io.jsonwebtoken.Claims;
 import io.jsonwebtoken.Jwts;
 import io.jsonwebtoken.security.Keys;
+import org.springframework.beans.factory.annotation.Value;
+import org.springframework.stereotype.Component;
 
 import javax.crypto.SecretKey;
 import java.nio.charset.StandardCharsets;
 import java.util.Date;
 
+@Component
 public class JwtUtil {
 
-    private static final String SECRET =
-            "dianping-demo-secret-key-12345678901234567890";
+    private static final long EXPIRE_TIME =
+            24 * 60 * 60 * 1000L;
 
-    private static final long EXPIRE_TIME = 24 * 60 * 60 * 1000L;
+    private final SecretKey secretKey;
 
-    private static final SecretKey KEY =
-            Keys.hmacShaKeyFor(SECRET.getBytes(StandardCharsets.UTF_8));
+    public JwtUtil(
+            @Value("${jwt.secret}")
+            String secret) {
 
-    public static String generateToken(
+        this.secretKey =
+                Keys.hmacShaKeyFor(
+                        secret.getBytes(
+                                StandardCharsets.UTF_8
+                        )
+                );
+    }
+
+    public String generateToken(
             Long userId,
             String username,
             String role,
             Long restaurantId) {
 
         return Jwts.builder()
-                .subject(String.valueOf(userId))
-                .claim("username", username)
-                .claim("role", role)
-                .claim("restaurantId", restaurantId)
-                .issuedAt(new Date())
-                .expiration(new Date(
-                        System.currentTimeMillis() + EXPIRE_TIME
-                ))
-                .signWith(KEY)
+                .subject(
+                        String.valueOf(userId)
+                )
+                .claim(
+                        "username",
+                        username
+                )
+                .claim(
+                        "role",
+                        role
+                )
+                .claim(
+                        "restaurantId",
+                        restaurantId
+                )
+                .issuedAt(
+                        new Date()
+                )
+                .expiration(
+                        new Date(
+                                System.currentTimeMillis()
+                                        + EXPIRE_TIME
+                        )
+                )
+                .signWith(secretKey)
                 .compact();
     }
 
-    public static Claims parseToken(String token) {
+    public Claims parseToken(
+            String token) {
+
         return Jwts.parser()
-                .verifyWith(KEY)
+                .verifyWith(secretKey)
                 .build()
                 .parseSignedClaims(token)
                 .getPayload();

@@ -11,11 +11,17 @@ import com.dianping.vo.RestaurantDetailVO;
 import com.dianping.vo.RestaurantReviewSummaryVO;
 import com.dianping.vo.RestaurantSearchVO;
 import com.dianping.vo.ReviewVO;
+import io.swagger.v3.oas.annotations.Operation;
+import io.swagger.v3.oas.annotations.tags.Tag;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.web.bind.annotation.*;
 
 import java.util.List;
 
+@Tag(
+        name = "餐厅接口",
+        description = "餐厅查询、搜索、评价等公共接口"
+)
 @RestController
 @RequestMapping("/restaurants")
 public class RestaurantController {
@@ -31,6 +37,10 @@ public class RestaurantController {
         return Result.success(restaurantService.findAll());
     }
 
+    @Operation(
+            summary = "查询餐厅详情",
+            description = "根据餐厅ID查询基本信息、平均评分和评价数量"
+    )
     @GetMapping("/{id}")
     public Result<RestaurantDetailVO> getRestaurantById(
             @PathVariable Long id) {

@@ -9,12 +9,19 @@ import com.dianping.mapper.ReviewMapper;
 import com.dianping.vo.RestaurantDetailVO;
 import com.dianping.vo.RestaurantReviewSummaryVO;
 import com.dianping.vo.RestaurantSearchVO;
+import com.fasterxml.jackson.core.JsonProcessingException;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.stereotype.Service;
 
 import java.math.BigDecimal;
 import java.util.List;
+import java.util.concurrent.ThreadLocalRandom;
+import java.util.concurrent.TimeUnit;
 
+@Slf4j
 @Service
 public class RestaurantService {
 
@@ -24,6 +31,16 @@ public class RestaurantService {
     private ReviewMapper reviewMapper;
     @Autowired
     private ReviewService reviewService;
+    @Autowired
+    private StringRedisTemplate stringRedisTemplate;
+    @Autowired
+    private ObjectMapper objectMapper;
+
+    private static final String RESTAURANT_DETAIL_KEY_PREFIX =
+            "restaurant:detail:";
+
+    private static final String NULL_CACHE_VALUE =
+            "__NULL__";
 
     public List<Restaurant> findAll() {
         return restaurantMapper.selectAll();
@@ -41,16 +58,61 @@ public class RestaurantService {
 
     public RestaurantDetailVO getRestaurantDetail(Long id) {
 
-        Restaurant restaurant =
-                restaurantMapper.selectById(id);
+        String key = RESTAURANT_DETAIL_KEY_PREFIX + id;
 
-        if (restaurant == null) {
-            throw new BusinessException("餐厅不存在");
+        // 1. 查 Redis
+        String json = stringRedisTemplate.opsForValue().get(key);
+
+        if (json != null) {
+            // 2. Redis 告诉我们：
+            //    这个餐厅之前已经确认不存在
+            if (NULL_CACHE_VALUE.equals(json)) {
+                log.debug(
+                        "命中餐厅详情缓存, restaurantId={}", id);
+                throw new BusinessException("餐厅不存在");
+            }
+
+            try {
+                return objectMapper.readValue(
+                        json,
+                        RestaurantDetailVO.class
+                );
+            } catch (JsonProcessingException e) {
+                throw new RuntimeException(
+                        "Redis缓存反序列化失败",
+                        e
+                );
+            }
         }
 
-        RestaurantReviewSummaryVO summary =
-                reviewService.getRestaurantReviewSummary(id);
+        log.debug("餐厅详情缓存未命中, 查询数据库, restaurantId={}", id);
 
+        // 3. Redis 没有，查询 MySQL
+        Restaurant restaurant = restaurantMapper.selectById(id);
+
+        // 4. MySQL 也没有：
+        //    写一个短时间的空值缓存
+        if (restaurant == null) {
+            stringRedisTemplate
+                    .opsForValue()
+                    .set(
+                            key,
+                            NULL_CACHE_VALUE,
+                            5,
+                            TimeUnit.MINUTES
+                    );
+
+            throw new BusinessException(
+                    "餐厅不存在"
+            );
+        }
+
+        // 5. 查询评价统计
+        RestaurantReviewSummaryVO summary =
+                reviewService
+                        .getRestaurantReviewSummary(id);
+
+        // 6. 组装 VO
         RestaurantDetailVO vo =
                 new RestaurantDetailVO();
 
@@ -60,13 +122,30 @@ public class RestaurantService {
         vo.setAddress(restaurant.getAddress());
         vo.setStatus(restaurant.getStatus());
 
-        vo.setAverageRating(
-                summary.getAverageRating()
-        );
+        vo.setAverageRating(summary.getAverageRating());
 
         vo.setReviewCount(
                 summary.getReviewCount()
         );
+
+        // 7. 正常数据缓存 30 分钟
+        try {
+
+            String value = objectMapper.writeValueAsString(vo);
+            long ttlMinutes = 30 + ThreadLocalRandom.current().nextLong(0, 11);
+            stringRedisTemplate
+                    .opsForValue()
+                    .set(
+                            key,
+                            value,
+                            ttlMinutes,
+                            TimeUnit.MINUTES
+                    );
+
+        } catch (JsonProcessingException e) {
+
+            throw new RuntimeException("Redis缓存序列化失败", e);
+        }
 
         return vo;
     }
@@ -142,6 +221,17 @@ public class RestaurantService {
         if (rows == 0) {
             throw new BusinessException("餐厅不存在");
         }
+        deleteRestaurantDetailCache(
+                restaurantId
+        );
+    }
+    private void deleteRestaurantDetailCache(Long restaurantId) {
+
+        String key = "restaurant:detail:" + restaurantId;
+
+        Boolean deleted = stringRedisTemplate.delete(key);
+
+        log.debug("删除餐厅详情缓存, restaurantId={}, deleted={}", restaurantId, deleted);
     }
 
     public void updateRestaurantStatus(
