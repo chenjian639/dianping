@@ -2,6 +2,7 @@ package com.dianping.mapper;
 
 import com.dianping.entity.Review;
 import com.dianping.vo.MyReviewVO;
+import com.dianping.vo.RestaurantReviewSummaryVO;
 import com.dianping.vo.ReviewVO;
 import org.apache.ibatis.annotations.*;
 
@@ -77,6 +78,15 @@ public interface ReviewMapper {
     WHERE restaurant_id = #{restaurantId}
     """)
     Long getReviewCount(Long restaurantId);
+
+    @Select("""
+    SELECT
+        COALESCE(ROUND(AVG(rating), 1), 0) AS averageRating,
+        COUNT(*) AS reviewCount
+    FROM review
+    WHERE restaurant_id = #{restaurantId}
+    """)
+    RestaurantReviewSummaryVO getRestaurantReviewSummary(Long restaurantId);
 
     @Select("""
     SELECT

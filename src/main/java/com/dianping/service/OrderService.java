@@ -13,7 +13,9 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.math.BigDecimal;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 
 @Slf4j
 @Service
@@ -44,10 +46,12 @@ public class OrderService {
         BigDecimal totalAmount = BigDecimal.ZERO;
 
         Long restaurantId = null;
+        Map<Long, Dish> dishesById = new HashMap<>();
 
         for (CartItemVO cartItem : cartItems) {
 
             Dish dish = dishMapper.selectById(cartItem.getDishId());
+            dishesById.put(cartItem.getDishId(), dish);
 
             if (dish == null || dish.getStatus() != 1) {
                 throw new BusinessException("存在无效或下架菜品");
@@ -83,7 +87,7 @@ public class OrderService {
 
         for (CartItemVO cartItem : cartItems) {
 
-            Dish dish = dishMapper.selectById(cartItem.getDishId());
+            Dish dish = dishesById.get(cartItem.getDishId());
 
             int rows = dishMapper.decreaseStock(
                     dish.getId(),

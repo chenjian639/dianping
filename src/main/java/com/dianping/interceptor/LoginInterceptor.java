@@ -2,12 +2,13 @@ package com.dianping.interceptor;
 
 import com.dianping.util.JwtUtil;
 import io.jsonwebtoken.Claims;
-import io.jsonwebtoken.Jwts;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Component;
 import org.springframework.web.servlet.HandlerInterceptor;
 
+@Slf4j
 @Component
 public class LoginInterceptor implements HandlerInterceptor {
     private final JwtUtil jwtUtil;
@@ -50,7 +51,7 @@ public class LoginInterceptor implements HandlerInterceptor {
             Long restaurantId = restaurantIdNumber == null ? null : restaurantIdNumber.longValue();
 
             request.setAttribute("restaurantId", restaurantId);
-            System.out.println("当前用户ID：" + userId);
+            log.debug("当前用户ID：{}", userId);
 
             return true;
 

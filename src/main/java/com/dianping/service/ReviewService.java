@@ -7,6 +7,7 @@ import com.dianping.entity.Review;
 import com.dianping.enums.OrderStatus;
 import com.dianping.exception.BusinessException;
 import com.dianping.mapper.OrderMapper;
+import com.dianping.mapper.RestaurantMapper;
 import com.dianping.mapper.ReviewMapper;
 import com.dianping.vo.MyReviewVO;
 import com.dianping.vo.RestaurantReviewSummaryVO;
@@ -14,9 +15,8 @@ import com.dianping.vo.ReviewVO;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
 
-import java.math.BigDecimal;
-import java.math.RoundingMode;
 import java.util.List;
 
 @Service
@@ -31,6 +31,10 @@ public class ReviewService {
     @Autowired
     private StringRedisTemplate stringRedisTemplate;
 
+    @Autowired
+    private RestaurantMapper restaurantMapper;
+
+    @Transactional
     public Long createReview(
             Long userId,
             CreateReviewDTO dto) {
@@ -73,6 +77,19 @@ public class ReviewService {
 
         // 4. 写数据库
         reviewMapper.insert(review);
+        // 5. 同步维护餐厅评分统计
+        int rows =
+                restaurantMapper.addReviewStatistics(
+                        order.getRestaurantId(),
+                        dto.getRating()
+                );
+
+        if (rows == 0) {
+            throw new BusinessException(
+                    "更新餐厅评分统计失败"
+            );
+        }
+        // 6. 删除餐厅详情缓存
         String key = "restaurant:detail:" + order.getRestaurantId();
 
         stringRedisTemplate.delete(key);
@@ -116,30 +133,7 @@ public class ReviewService {
     public RestaurantReviewSummaryVO getRestaurantReviewSummary(
             Long restaurantId) {
 
-        BigDecimal averageRating =
-                reviewMapper.getAverageRating(restaurantId);
-
-        Long reviewCount =
-                reviewMapper.getReviewCount(restaurantId);
-
-        RestaurantReviewSummaryVO vo =
-                new RestaurantReviewSummaryVO();
-
-        // 如果完全没有评价，AVG 会返回 null
-        if (averageRating == null) {
-            averageRating = BigDecimal.ZERO;
-        } else {
-            averageRating =
-                    averageRating.setScale(
-                            1,
-                            RoundingMode.HALF_UP
-                    );
-        }
-
-        vo.setAverageRating(averageRating);
-        vo.setReviewCount(reviewCount);
-
-        return vo;
+        return reviewMapper.getRestaurantReviewSummary(restaurantId);
     }
 
     public PageResult<MyReviewVO> getMyReviews(

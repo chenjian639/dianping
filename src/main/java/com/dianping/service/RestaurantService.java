@@ -41,6 +41,10 @@ public class RestaurantService {
 
     private static final String NULL_CACHE_VALUE =
             "__NULL__";
+    private static final String RESTAURANT_SEARCH_KEY_PREFIX =
+            "restaurant:search:";
+
+    private static final long SEARCH_CACHE_TTL_MINUTES = 2;
 
     public List<Restaurant> findAll() {
         return restaurantMapper.selectAll();
@@ -185,24 +189,97 @@ public class RestaurantService {
             );
         }
 
+        // 1. 生成缓存 key
+        String cacheKey =
+                RESTAURANT_SEARCH_KEY_PREFIX
+                        + keyword
+                        + ":"
+                        + sort
+                        + ":"
+                        + page
+                        + ":"
+                        + pageSize;
+
+        // 2. 先查 Redis
+        String cached =
+                stringRedisTemplate
+                        .opsForValue()
+                        .get(cacheKey);
+
+        if (cached != null) {
+            try {
+                return objectMapper.readValue(
+                        cached,
+                        objectMapper
+                                .getTypeFactory()
+                                .constructParametricType(
+                                        PageResult.class,
+                                        RestaurantSearchVO.class
+                                )
+                );
+            } catch (JsonProcessingException e) {
+                throw new RuntimeException(
+                        "搜索缓存反序列化失败",
+                        e
+                );
+            }
+        }
+
+        // 3. Redis 未命中，再查 MySQL
         int offset = (page - 1) * pageSize;
+
+        int querySize = pageSize + 1;
 
         List<RestaurantSearchVO> records =
                 restaurantMapper.searchByKeywordPage(
                         keyword,
                         sort,
                         offset,
-                        pageSize
+                        querySize
                 );
 
-        Long total =
-                restaurantMapper.countByKeyword(keyword);
+        boolean hasNext =
+                records.size() > pageSize;
+
+        if (hasNext) {
+            records =
+                    records.subList(
+                            0,
+                            pageSize
+                    );
+        }
 
         PageResult<RestaurantSearchVO> result =
                 new PageResult<>();
 
-        result.setTotal(total);
+        result.setTotal(null);
+        result.setHasNext(hasNext);
         result.setRecords(records);
+
+        // 4. 写入 Redis
+        try {
+
+            String json =
+                    objectMapper.writeValueAsString(
+                            result
+                    );
+
+            stringRedisTemplate
+                    .opsForValue()
+                    .set(
+                            cacheKey,
+                            json,
+                            SEARCH_CACHE_TTL_MINUTES,
+                            TimeUnit.MINUTES
+                    );
+
+        } catch (JsonProcessingException e) {
+
+            throw new RuntimeException(
+                    "搜索缓存序列化失败",
+                    e
+            );
+        }
 
         return result;
     }

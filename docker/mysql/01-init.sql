@@ -55,7 +55,8 @@ CREATE TABLE dish (
                       created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
                           COMMENT '创建时间',
 
-                      INDEX idx_restaurant_id (restaurant_id),
+                      INDEX idx_dish_restaurant_deleted_status_created
+                          (restaurant_id, deleted, status, created_at DESC, id DESC),
 
                       CONSTRAINT fk_dish_restaurant
                           FOREIGN KEY (restaurant_id)
@@ -110,8 +111,10 @@ CREATE TABLE orders (
                             ON UPDATE CURRENT_TIMESTAMP
                             COMMENT '更新时间',
 
-                        INDEX idx_user_id (user_id),
-                        INDEX idx_restaurant_id (restaurant_id),
+                        INDEX idx_orders_user_created
+                            (user_id, created_at DESC, id DESC),
+                        INDEX idx_orders_restaurant_status_created
+                            (restaurant_id, status, created_at DESC, id DESC),
 
                         CONSTRAINT fk_order_user
                             FOREIGN KEY (user_id)
@@ -169,8 +172,12 @@ CREATE TABLE review (
 
                         UNIQUE KEY uk_order_id (order_id),
 
-                        INDEX idx_user_id (user_id),
-                        INDEX idx_restaurant_id (restaurant_id),
+                        INDEX idx_review_user_created
+                            (user_id, created_at DESC),
+                        INDEX idx_review_restaurant_created
+                            (restaurant_id, created_at DESC),
+                        INDEX idx_review_restaurant_rating
+                            (restaurant_id, rating),
 
                         CONSTRAINT fk_review_user
                             FOREIGN KEY (user_id)
@@ -186,3 +193,8 @@ CREATE TABLE review (
 ) ENGINE=InnoDB
   DEFAULT CHARSET=utf8mb4
     COMMENT='用户评价表';
+
+ALTER TABLE restaurant
+    ADD INDEX idx_restaurant_status_created
+        (status, created_at DESC, id DESC),
+    ADD FULLTEXT INDEX ft_restaurant_name_ngram (name) WITH PARSER ngram;

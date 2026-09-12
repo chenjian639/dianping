@@ -6,6 +6,7 @@ import com.dianping.entity.Review;
 import com.dianping.enums.OrderStatus;
 import com.dianping.exception.BusinessException;
 import com.dianping.mapper.OrderMapper;
+import com.dianping.mapper.RestaurantMapper;
 import com.dianping.mapper.ReviewMapper;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -29,6 +30,9 @@ class ReviewServiceTest {
 
     @Mock
     private StringRedisTemplate stringRedisTemplate;
+
+    @Mock
+    private RestaurantMapper restaurantMapper;
 
     @InjectMocks
     private ReviewService reviewService;
@@ -68,6 +72,11 @@ class ReviewServiceTest {
                     review.setId(200L);
                     return 1;
                 });
+
+        when(restaurantMapper.addReviewStatistics(
+                1L,
+                5
+        )).thenReturn(1);
 
         Long reviewId =
                 reviewService.createReview(
@@ -112,6 +121,12 @@ class ReviewServiceTest {
                 "很好吃",
                 savedReview.getContent()
         );
+
+        verify(restaurantMapper)
+                .addReviewStatistics(
+                        1L,
+                        5
+                );
 
         verify(stringRedisTemplate)
                 .delete(

@@ -24,10 +24,14 @@ public interface RestaurantMapper {
     );
 
     @Select("""
+    <script>
     SELECT COUNT(*)
     FROM restaurant
     WHERE status = 1
-      AND name LIKE CONCAT('%', #{keyword}, '%')
+    <if test="keyword != null and keyword != ''">
+      AND MATCH(name) AGAINST(#{keyword} IN NATURAL LANGUAGE MODE)
+    </if>
+    </script>
     """)
     Long countByKeyword(String keyword);
 
@@ -53,5 +57,24 @@ public interface RestaurantMapper {
     int updateStatus(
             Long restaurantId,
             Integer status
+    );
+
+    @Update("""
+    UPDATE restaurant
+    SET average_rating =
+            ROUND(
+                (
+                    average_rating * review_count
+                    + #{rating}
+                )
+                / (review_count + 1),
+                1
+            ),
+        review_count = review_count + 1
+    WHERE id = #{restaurantId}
+    """)
+    int addReviewStatistics(
+            Long restaurantId,
+            Integer rating
     );
 }
