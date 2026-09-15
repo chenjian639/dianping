@@ -1,6 +1,7 @@
 package com.dianping.service;
 
 import com.dianping.common.PageResult;
+import com.dianping.config.RabbitMQConfig;
 import com.dianping.dto.UpdateRestaurantDTO;
 import com.dianping.entity.Restaurant;
 import com.dianping.exception.BusinessException;
@@ -12,6 +13,7 @@ import com.dianping.vo.RestaurantSearchVO;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.amqp.rabbit.core.RabbitTemplate;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.stereotype.Service;
@@ -35,6 +37,8 @@ public class RestaurantService {
     private StringRedisTemplate stringRedisTemplate;
     @Autowired
     private ObjectMapper objectMapper;
+    @Autowired
+    private RabbitTemplate rabbitTemplate;
 
     private static final String RESTAURANT_DETAIL_KEY_PREFIX =
             "restaurant:detail:";
@@ -332,10 +336,13 @@ public class RestaurantService {
     }
     private void deleteRestaurantDetailCache(Long restaurantId) {
 
-        String key = RESTAURANT_DETAIL_KEY_PREFIX + restaurantId;
+        String key =
+                RESTAURANT_DETAIL_KEY_PREFIX + restaurantId;
 
         try {
-            Boolean deleted = stringRedisTemplate.delete(key);
+
+            Boolean deleted =
+                    stringRedisTemplate.delete(key);
 
             log.debug(
                     "删除餐厅详情缓存成功, restaurantId={}, deleted={}",
@@ -346,7 +353,33 @@ public class RestaurantService {
         } catch (Exception e) {
 
             log.error(
-                    "删除餐厅详情缓存失败，数据库已更新，等待后续缓存失效, restaurantId={}, error={}",
+                    "删除餐厅详情缓存失败，准备发送缓存失效补偿消息, restaurantId={}, error={}",
+                    restaurantId,
+                    e.getMessage()
+            );
+
+            sendCacheEvictMessage(restaurantId);
+        }
+    }
+
+    private void sendCacheEvictMessage(Long restaurantId) {
+
+        try {
+
+            rabbitTemplate.convertAndSend(
+                    RabbitMQConfig.RESTAURANT_CACHE_EVICT_QUEUE,
+                    restaurantId
+            );
+
+            log.info(
+                    "缓存失效补偿消息发送成功, restaurantId={}",
+                    restaurantId
+            );
+
+        } catch (Exception e) {
+
+            log.error(
+                    "缓存失效补偿消息发送失败, restaurantId={}, error={}",
                     restaurantId,
                     e.getMessage()
             );
