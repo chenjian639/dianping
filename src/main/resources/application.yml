@@ -25,7 +25,7 @@ mybatis:
     map-underscore-to-camel-case: true
 
 jwt:
-  secret: ${JWT_SECRET}
+  secret: ${JWT_SECRET:your-secret-key-at-least-32-chars-long}
 
 springdoc:
   swagger-ui:
@@ -38,3 +38,12 @@ logging:
     root: INFO
     com.dianping: INFO
     com.dianping.exception.GlobalExceptionHandler: DEBUG
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health
+  endpoint:
+    health:
+      show-details: never

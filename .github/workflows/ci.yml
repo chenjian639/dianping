@@ -92,12 +92,11 @@ jobs:
           echo "Waiting for application startup..."
 
           for i in {1..12}; do
-            STATUS=$(curl -s -o /dev/null -w "%{http_code}" \
-              https://api.chenjianai.xyz/ || true)
+            RESPONSE=$(curl -s https://api.chenjianai.xyz/actuator/health || true)
 
-            echo "Attempt $i: HTTP $STATUS"
+            echo "Attempt $i: $RESPONSE"
 
-            if [ "$STATUS" = "401" ]; then
+            if echo "$RESPONSE" | grep -q '"status":"UP"'; then
               echo "Application is healthy."
               exit 0
             fi
