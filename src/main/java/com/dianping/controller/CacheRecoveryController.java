@@ -30,4 +30,12 @@ public class CacheRecoveryController {
 
         return Result.success("DLQ重放已停止");
     }
+
+    @PostMapping("/test-routing-failure")
+    public Result<String> testRoutingFailure() {
+
+        cacheRecoveryService.sendRoutingFailureTest();
+
+        return Result.success("routing failure test sent");
+    }
 }
