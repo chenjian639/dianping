@@ -332,11 +332,25 @@ public class RestaurantService {
     }
     private void deleteRestaurantDetailCache(Long restaurantId) {
 
-        String key = "restaurant:detail:" + restaurantId;
+        String key = RESTAURANT_DETAIL_KEY_PREFIX + restaurantId;
 
-        Boolean deleted = stringRedisTemplate.delete(key);
+        try {
+            Boolean deleted = stringRedisTemplate.delete(key);
 
-        log.debug("删除餐厅详情缓存, restaurantId={}, deleted={}", restaurantId, deleted);
+            log.debug(
+                    "删除餐厅详情缓存成功, restaurantId={}, deleted={}",
+                    restaurantId,
+                    deleted
+            );
+
+        } catch (Exception e) {
+
+            log.error(
+                    "删除餐厅详情缓存失败，数据库已更新，等待后续缓存失效, restaurantId={}, error={}",
+                    restaurantId,
+                    e.getMessage()
+            );
+        }
     }
 
     public void updateRestaurantStatus(
