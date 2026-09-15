@@ -3,8 +3,10 @@ package com.dianping.service;
 import com.dianping.common.PageResult;
 import com.dianping.config.RabbitMQConfig;
 import com.dianping.dto.UpdateRestaurantDTO;
+import com.dianping.entity.OutboxEvent;
 import com.dianping.entity.Restaurant;
 import com.dianping.exception.BusinessException;
+import com.dianping.mapper.OutboxEventMapper;
 import com.dianping.mapper.RestaurantMapper;
 import com.dianping.mapper.ReviewMapper;
 import com.dianping.vo.RestaurantDetailVO;
@@ -18,6 +20,7 @@ import org.springframework.amqp.rabbit.core.RabbitTemplate;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
 
 import java.math.BigDecimal;
 import java.util.List;
@@ -41,6 +44,8 @@ public class RestaurantService {
     private ObjectMapper objectMapper;
     @Autowired
     private RabbitTemplate rabbitTemplate;
+    @Autowired
+    private  OutboxEventMapper outboxEventMapper;
 
     private static final String RESTAURANT_DETAIL_KEY_PREFIX =
             "restaurant:detail:";
@@ -318,6 +323,7 @@ public class RestaurantService {
         return result;
     }
 
+    @Transactional
     public void updateRestaurant(
             Long restaurantId,
             UpdateRestaurantDTO dto) {
@@ -332,6 +338,19 @@ public class RestaurantService {
         if (rows == 0) {
             throw new BusinessException("餐厅不存在");
         }
+        // 2. 同一个事务写Outbox
+        OutboxEvent event = new OutboxEvent();
+
+        event.setEventId(UUID.randomUUID().toString());
+        event.setEventType("RESTAURANT_CACHE_EVICT");
+        event.setAggregateId(restaurantId);
+        event.setPayload(String.valueOf(restaurantId));
+        event.setStatus("PENDING");
+        event.setRetryCount(0);
+
+        outboxEventMapper.insert(event);
+
+        // 3. 原来的Redis删除逻辑暂时保留
         deleteRestaurantDetailCache(
                 restaurantId
         );
