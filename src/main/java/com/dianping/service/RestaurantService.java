@@ -64,15 +64,28 @@ public class RestaurantService {
 
         String key = RESTAURANT_DETAIL_KEY_PREFIX + id;
 
-        // 1. 查 Redis
-        String json = stringRedisTemplate.opsForValue().get(key);
+        // 1. 尝试读取 Redis
+        String json = null;
 
+        try {
+            json = stringRedisTemplate.opsForValue().get(key);
+        } catch (Exception e) {
+            log.warn(
+                    "读取餐厅详情缓存失败，降级查询数据库, restaurantId={}, error={}",
+                    id,
+                    e.getMessage()
+            );
+        }
+
+        // 2. Redis 正常且命中缓存
         if (json != null) {
-            // 2. Redis 告诉我们：
-            //    这个餐厅之前已经确认不存在
+
             if (NULL_CACHE_VALUE.equals(json)) {
                 log.debug(
-                        "命中餐厅详情缓存, restaurantId={}", id);
+                        "命中餐厅空值缓存, restaurantId={}",
+                        id
+                );
+
                 throw new BusinessException("餐厅不存在");
             }
 
@@ -82,39 +95,49 @@ public class RestaurantService {
                         RestaurantDetailVO.class
                 );
             } catch (JsonProcessingException e) {
-                throw new RuntimeException(
-                        "Redis缓存反序列化失败",
-                        e
+                log.warn(
+                        "餐厅详情缓存反序列化失败，降级查询数据库, restaurantId={}, error={}",
+                        id,
+                        e.getMessage()
                 );
             }
         }
 
-        log.debug("餐厅详情缓存未命中, 查询数据库, restaurantId={}", id);
+        // 3. Redis MISS / Redis 故障 / 缓存数据异常
+        log.debug(
+                "查询数据库获取餐厅详情, restaurantId={}",
+                id
+        );
 
-        // 3. Redis 没有，查询 MySQL
-        Restaurant restaurant = restaurantMapper.selectById(id);
+        Restaurant restaurant =
+                restaurantMapper.selectById(id);
 
-        // 4. MySQL 也没有：
-        //    写一个短时间的空值缓存
+        // 4. MySQL 中也不存在
         if (restaurant == null) {
-            stringRedisTemplate
-                    .opsForValue()
-                    .set(
-                            key,
-                            NULL_CACHE_VALUE,
-                            5,
-                            TimeUnit.MINUTES
-                    );
 
-            throw new BusinessException(
-                    "餐厅不存在"
-            );
+            try {
+                stringRedisTemplate
+                        .opsForValue()
+                        .set(
+                                key,
+                                NULL_CACHE_VALUE,
+                                5,
+                                TimeUnit.MINUTES
+                        );
+            } catch (Exception e) {
+                log.warn(
+                        "写入餐厅空值缓存失败, restaurantId={}, error={}",
+                        id,
+                        e.getMessage()
+                );
+            }
+
+            throw new BusinessException("餐厅不存在");
         }
 
         // 5. 查询评价统计
         RestaurantReviewSummaryVO summary =
-                reviewService
-                        .getRestaurantReviewSummary(id);
+                reviewService.getRestaurantReviewSummary(id);
 
         // 6. 组装 VO
         RestaurantDetailVO vo =
@@ -125,18 +148,19 @@ public class RestaurantService {
         vo.setDescription(restaurant.getDescription());
         vo.setAddress(restaurant.getAddress());
         vo.setStatus(restaurant.getStatus());
-
         vo.setAverageRating(summary.getAverageRating());
+        vo.setReviewCount(summary.getReviewCount());
 
-        vo.setReviewCount(
-                summary.getReviewCount()
-        );
-
-        // 7. 正常数据缓存 30 分钟
+        // 7. 尝试写 Redis
         try {
 
-            String value = objectMapper.writeValueAsString(vo);
-            long ttlMinutes = 30 + ThreadLocalRandom.current().nextLong(0, 11);
+            String value =
+                    objectMapper.writeValueAsString(vo);
+
+            long ttlMinutes =
+                    30 + ThreadLocalRandom.current()
+                            .nextLong(0, 11);
+
             stringRedisTemplate
                     .opsForValue()
                     .set(
@@ -146,9 +170,13 @@ public class RestaurantService {
                             TimeUnit.MINUTES
                     );
 
-        } catch (JsonProcessingException e) {
+        } catch (Exception e) {
 
-            throw new RuntimeException("Redis缓存序列化失败", e);
+            log.warn(
+                    "写入餐厅详情缓存失败，不影响本次查询结果, restaurantId={}, error={}",
+                    id,
+                    e.getMessage()
+            );
         }
 
         return vo;
