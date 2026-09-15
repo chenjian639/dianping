@@ -1,4 +1,4 @@
-name: Dianping CI
+name: Dianping CI/CD
 
 on:
   push:
@@ -23,3 +23,61 @@ jobs:
 
       - name: Build with Maven
         run: mvn clean package -DskipTests
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: dianping-jar
+          path: target/dianping-0.0.1-SNAPSHOT.jar
+
+  deploy:
+    if: github.event_name == 'push'
+    needs: build
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Download artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: dianping-jar
+
+      - name: Configure SSH
+        env:
+          SSH_PRIVATE_KEY: ${{ secrets.ECS_SSH_KEY }}
+          ECS_HOST: ${{ secrets.ECS_HOST }}
+        run: |
+          mkdir -p ~/.ssh
+          printf '%s\n' "$SSH_PRIVATE_KEY" > ~/.ssh/dianping_deploy
+          chmod 600 ~/.ssh/dianping_deploy
+          ssh-keyscan -H "$ECS_HOST" >> ~/.ssh/known_hosts
+
+      - name: Upload jar
+        env:
+          ECS_HOST: ${{ secrets.ECS_HOST }}
+          ECS_USER: ${{ secrets.ECS_USER }}
+        run: |
+          scp -i ~/.ssh/dianping_deploy \
+            dianping-0.0.1-SNAPSHOT.jar \
+            "$ECS_USER@$ECS_HOST:/home/dodo/projects/dianping/target/dianping-new.jar"
+
+      - name: Deploy application
+        env:
+          ECS_HOST: ${{ secrets.ECS_HOST }}
+          ECS_USER: ${{ secrets.ECS_USER }}
+        run: |
+          ssh -i ~/.ssh/dianping_deploy "$ECS_USER@$ECS_HOST" '
+            set -e
+            cd /home/dodo/projects/dianping/target
+            mv dianping-new.jar dianping-0.0.1-SNAPSHOT.jar
+            sudo -n /usr/bin/systemctl restart dianping
+          '
+
+      - name: Health check
+        run: |
+          sleep 8
+          STATUS=$(curl -s -o /dev/null -w "%{http_code}" https://api.chenjianai.xyz/)
+          echo "HTTP status: $STATUS"
+          if [ "$STATUS" != "401" ]; then
+            echo "Health check failed"
+            exit 1
+          fi
