@@ -67,17 +67,68 @@ jobs:
         run: |
           ssh -i ~/.ssh/dianping_deploy "$ECS_USER@$ECS_HOST" '
             set -e
-            cd /home/dodo/projects/dianping/target
-            mv dianping-new.jar dianping-0.0.1-SNAPSHOT.jar
+
+            DEPLOY_DIR=/home/dodo/projects/dianping/target
+            APP_JAR=$DEPLOY_DIR/dianping-0.0.1-SNAPSHOT.jar
+            NEW_JAR=$DEPLOY_DIR/dianping-new.jar
+            BACKUP_JAR=$DEPLOY_DIR/dianping-backup.jar
+
+            cd "$DEPLOY_DIR"
+
+            echo "Backing up current version..."
+            cp "$APP_JAR" "$BACKUP_JAR"
+
+            echo "Deploying new version..."
+            mv "$NEW_JAR" "$APP_JAR"
+
+            echo "Restarting application..."
             sudo -n /usr/bin/systemctl restart dianping
           '
 
       - name: Health check
+        id: health
+        continue-on-error: true
         run: |
-          sleep 8
-          STATUS=$(curl -s -o /dev/null -w "%{http_code}" https://api.chenjianai.xyz/)
-          echo "HTTP status: $STATUS"
-          if [ "$STATUS" != "401" ]; then
-            echo "Health check failed"
-            exit 1
-          fi
+          echo "Waiting for application startup..."
+
+          for i in {1..12}; do
+            STATUS=$(curl -s -o /dev/null -w "%{http_code}" \
+              https://api.chenjianai.xyz/ || true)
+
+            echo "Attempt $i: HTTP $STATUS"
+
+            if [ "$STATUS" = "401" ]; then
+              echo "Application is healthy."
+              exit 0
+            fi
+
+            sleep 5
+          done
+
+          echo "Health check failed."
+          exit 1
+
+      - name: Rollback
+        if: steps.health.outcome == 'failure'
+        env:
+          ECS_HOST: ${{ secrets.ECS_HOST }}
+          ECS_USER: ${{ secrets.ECS_USER }}
+        run: |
+          ssh -i ~/.ssh/dianping_deploy "$ECS_USER@$ECS_HOST" '
+            set -e
+
+            DEPLOY_DIR=/home/dodo/projects/dianping/target
+            APP_JAR=$DEPLOY_DIR/dianping-0.0.1-SNAPSHOT.jar
+            BACKUP_JAR=$DEPLOY_DIR/dianping-backup.jar
+
+            echo "Health check failed. Rolling back..."
+
+            cp "$BACKUP_JAR" "$APP_JAR"
+
+            sudo -n /usr/bin/systemctl restart dianping
+
+            echo "Rollback completed."
+          '
+
+          echo "Deployment failed and rollback was triggered."
+          exit 1
