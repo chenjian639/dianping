@@ -40,10 +40,13 @@ logging:
     com.dianping.exception.GlobalExceptionHandler: DEBUG
 
 management:
+  endpoint:
+    health:
+      probes:
+        enabled: true
+      show-details: never
+
   endpoints:
     web:
       exposure:
         include: health
-  endpoint:
-    health:
-      show-details: never

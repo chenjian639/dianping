@@ -92,7 +92,7 @@ jobs:
           echo "Waiting for application startup..."
 
           for i in {1..12}; do
-            RESPONSE=$(curl -s https://api.chenjianai.xyz/actuator/health || true)
+            RESPONSE=$(curl -s https://api.chenjianai.xyz/actuator/health/liveness || true)
 
             echo "Attempt $i: $RESPONSE"
 
