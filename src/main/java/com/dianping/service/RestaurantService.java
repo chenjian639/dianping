@@ -13,6 +13,7 @@ import com.dianping.vo.RestaurantSearchVO;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.amqp.rabbit.connection.CorrelationData;
 import org.springframework.amqp.rabbit.core.RabbitTemplate;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.data.redis.core.StringRedisTemplate;
@@ -20,6 +21,7 @@ import org.springframework.stereotype.Service;
 
 import java.math.BigDecimal;
 import java.util.List;
+import java.util.UUID;
 import java.util.concurrent.ThreadLocalRandom;
 import java.util.concurrent.TimeUnit;
 
@@ -364,23 +366,32 @@ public class RestaurantService {
 
     private void sendCacheEvictMessage(Long restaurantId) {
 
+        String messageId = UUID.randomUUID().toString();
+
+        CorrelationData correlationData =
+                new CorrelationData(messageId);
+
         try {
 
             rabbitTemplate.convertAndSend(
+                    "",
                     RabbitMQConfig.RESTAURANT_CACHE_EVICT_QUEUE,
-                    restaurantId
+                    restaurantId,
+                    correlationData
             );
 
             log.info(
-                    "缓存失效补偿消息发送成功, restaurantId={}",
-                    restaurantId
+                    "缓存失效补偿消息已提交发送, restaurantId={}, messageId={}",
+                    restaurantId,
+                    messageId
             );
 
         } catch (Exception e) {
 
             log.error(
-                    "缓存失效补偿消息发送失败, restaurantId={}, error={}",
+                    "缓存失效补偿消息发送异常, restaurantId={}, messageId={}, error={}",
                     restaurantId,
+                    messageId,
                     e.getMessage()
             );
         }
