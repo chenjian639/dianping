@@ -19,6 +19,10 @@ spring:
           max-idle: 16
           min-idle: 4
   rabbitmq:
+    host: ${RABBITMQ_HOST:localhost}
+    port: ${RABBITMQ_PORT:5672}
+    username: ${RABBITMQ_USERNAME}
+    password: ${RABBITMQ_PASSWORD}
     publisher-confirm-type: correlated
     publisher-returns: true
 
