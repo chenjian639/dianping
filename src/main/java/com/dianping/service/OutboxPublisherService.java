@@ -50,6 +50,14 @@ public class OutboxPublisherService {
                 continue;
             }
 
+            log.info(
+                    "Outbox抢占成功, eventId={}, port={}",
+                    event.getEventId()
+            );
+
+            // 仅用于双实例竞争实验
+            Thread.sleep(3000);
+
             try {
 
                 CorrelationData correlationData =
