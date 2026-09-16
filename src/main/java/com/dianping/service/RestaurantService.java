@@ -72,13 +72,14 @@ public class RestaurantService {
 
         // 1. 尝试读取 Redis
         String json = null;
-
+        long redisGetStart = System.currentTimeMillis();
         try {
             json = stringRedisTemplate.opsForValue().get(key);
         } catch (Exception e) {
             log.warn(
-                    "读取餐厅详情缓存失败，降级查询数据库, restaurantId={}, error={}",
+                    "读取餐厅详情缓存失败，降级查询数据库, restaurantId={}, cost={}ms,error={}",
                     id,
+                    System.currentTimeMillis() - redisGetStart,
                     e.getMessage()
             );
         }
@@ -115,8 +116,15 @@ public class RestaurantService {
                 id
         );
 
+        long dbStart = System.currentTimeMillis();
         Restaurant restaurant =
                 restaurantMapper.selectById(id);
+
+        log.info(
+                "查询餐厅数据库完成, restaurantId={}, cost={}ms",
+                id,
+                System.currentTimeMillis() - dbStart
+        );
 
         // 4. MySQL 中也不存在
         if (restaurant == null) {
@@ -142,8 +150,16 @@ public class RestaurantService {
         }
 
         // 5. 查询评价统计
+        long reviewStart = System.currentTimeMillis();
+
         RestaurantReviewSummaryVO summary =
                 reviewService.getRestaurantReviewSummary(id);
+
+        log.info(
+                "查询评价统计完成, restaurantId={}, cost={}ms",
+                id,
+                System.currentTimeMillis() - reviewStart
+        );
 
         // 6. 组装 VO
         RestaurantDetailVO vo =
@@ -158,6 +174,7 @@ public class RestaurantService {
         vo.setReviewCount(summary.getReviewCount());
 
         // 7. 尝试写 Redis
+        long redisSetStart = System.currentTimeMillis();
         try {
 
             String value =
@@ -179,8 +196,9 @@ public class RestaurantService {
         } catch (Exception e) {
 
             log.warn(
-                    "写入餐厅详情缓存失败，不影响本次查询结果, restaurantId={}, error={}",
+                    "写入餐厅详情缓存失败，不影响本次查询结果, restaurantId={}, cost={}ms, error={}",
                     id,
+                    System.currentTimeMillis() - redisSetStart,
                     e.getMessage()
             );
         }
