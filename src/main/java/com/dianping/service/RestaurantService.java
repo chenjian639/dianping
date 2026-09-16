@@ -350,37 +350,7 @@ public class RestaurantService {
 
         outboxEventMapper.insert(event);
 
-        // 3. 原来的Redis删除逻辑暂时保留
-        deleteRestaurantDetailCache(
-                restaurantId
-        );
-    }
-    private void deleteRestaurantDetailCache(Long restaurantId) {
 
-        String key =
-                RESTAURANT_DETAIL_KEY_PREFIX + restaurantId;
-
-        try {
-
-            Boolean deleted =
-                    stringRedisTemplate.delete(key);
-
-            log.debug(
-                    "删除餐厅详情缓存成功, restaurantId={}, deleted={}",
-                    restaurantId,
-                    deleted
-            );
-
-        } catch (Exception e) {
-
-            log.error(
-                    "删除餐厅详情缓存失败，准备发送缓存失效补偿消息, restaurantId={}, error={}",
-                    restaurantId,
-                    e.getMessage()
-            );
-
-            sendCacheEvictMessage(restaurantId);
-        }
     }
 
     private void sendCacheEvictMessage(Long restaurantId) {

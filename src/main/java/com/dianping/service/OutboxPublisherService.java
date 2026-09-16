@@ -55,14 +55,6 @@ public class OutboxPublisherService {
                     event.getEventId()
             );
 
-            // 仅用于双实例竞争实验
-            try {
-                Thread.sleep(3000);
-            } catch (InterruptedException e) {
-                Thread.currentThread().interrupt();
-                log.warn("sleep被中断");
-            }
-
             try {
 
                 CorrelationData correlationData =
@@ -125,6 +117,20 @@ public class OutboxPublisherService {
                     event.getEventId(),
                     nextRetryCount,
                     reason
+            );
+        }
+    }
+
+    @Scheduled(fixedDelay = 30000)
+    public void recoverStuckEvents() {
+
+        int recovered =
+                outboxEventMapper.recoverStuckProcessing();
+
+        if (recovered > 0) {
+            log.warn(
+                    "恢复超时PROCESSING Outbox事件, count={}",
+                    recovered
             );
         }
     }

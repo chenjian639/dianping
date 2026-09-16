@@ -32,6 +32,7 @@ public interface OutboxEventMapper {
     @Update("""
     UPDATE outbox_event
     SET status = 'SENT',
+        processing_at = NULL,
         updated_at = NOW()
     WHERE id = #{id}
       AND status = 'PROCESSING'
@@ -40,16 +41,9 @@ public interface OutboxEventMapper {
 
     @Update("""
     UPDATE outbox_event
-    SET retry_count = retry_count + 1,
-        updated_at = NOW()
-    WHERE id = #{id}
-    """)
-    int incrementRetry(Long id);
-
-    @Update("""
-    UPDATE outbox_event
     SET status = 'FAILED',
         retry_count = retry_count + 1,
+        processing_at = NULL,
         updated_at = NOW()
     WHERE id = #{id}
       AND status = 'PROCESSING'
@@ -59,6 +53,7 @@ public interface OutboxEventMapper {
     @Update("""
     UPDATE outbox_event
     SET status = 'PROCESSING',
+        processing_at = NOW(),
         updated_at = NOW()
     WHERE id = #{id}
       AND status = 'PENDING'
@@ -69,9 +64,20 @@ public interface OutboxEventMapper {
     UPDATE outbox_event
     SET status = 'PENDING',
         retry_count = retry_count + 1,
+        processing_at = NULL,
         updated_at = NOW()
     WHERE id = #{id}
       AND status = 'PROCESSING'
     """)
     int releaseForRetry(Long id);
+
+    @Update("""
+    UPDATE outbox_event
+    SET status = 'PENDING',
+        processing_at = NULL,
+        updated_at = NOW()
+    WHERE status = 'PROCESSING'
+      AND processing_at < DATE_SUB(NOW(), INTERVAL 1 MINUTE)
+    """)
+    int recoverStuckProcessing();
 }

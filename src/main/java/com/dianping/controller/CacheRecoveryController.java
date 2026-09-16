@@ -34,19 +34,4 @@ public class CacheRecoveryController {
         return Result.success("DLQ重放已停止");
     }
 
-    @PostMapping("/test-routing-failure")
-    public Result<String> testRoutingFailure() {
-
-        cacheRecoveryService.sendRoutingFailureTest();
-
-        return Result.success("routing failure test sent");
-    }
-
-    @PostMapping("/outbox/publish")
-    public Result<String> publishOutbox() {
-
-        outboxPublisherService.publishPending();
-
-        return Result.success("outbox publish finished");
-    }
 }
