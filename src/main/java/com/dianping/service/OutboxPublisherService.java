@@ -51,12 +51,12 @@ public class OutboxPublisherService {
 
                 if (confirm.isAck()) {
 
-                    outboxEventMapper.markSent(event.getId());
-
-                    log.info(
-                            "Outbox投递成功并标记SENT, eventId={}",
+                    log.warn(
+                            "故障注入：Broker已经Confirm ACK，但故意不标记SENT, eventId={}",
                             event.getEventId()
                     );
+
+                    throw new RuntimeException("模拟Confirm ACK后、markSent前应用宕机");
 
                 } else {
 
