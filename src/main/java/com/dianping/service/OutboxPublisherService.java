@@ -56,7 +56,12 @@ public class OutboxPublisherService {
             );
 
             // 仅用于双实例竞争实验
-            Thread.sleep(3000);
+            try {
+                Thread.sleep(3000);
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+                log.warn("sleep被中断");
+            }
 
             try {
 
