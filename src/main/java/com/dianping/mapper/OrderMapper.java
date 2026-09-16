@@ -10,19 +10,35 @@ import java.util.List;
 public interface OrderMapper {
 
     @Insert("""
-        INSERT INTO orders(user_id, restaurant_id, total_amount, status)
-        VALUES(#{userId}, #{restaurantId}, #{totalAmount}, #{status})
-        """)
+    INSERT INTO orders(
+        user_id,
+        restaurant_id,
+        total_amount,
+        status,
+        request_id
+    )
+    VALUES(
+        #{userId},
+        #{restaurantId},
+        #{totalAmount},
+        #{status},
+        #{requestId}
+    )
+    """)
     @Options(useGeneratedKeys = true, keyProperty = "id")
     int insert(Order order);
 
     @Select("""
-        SELECT *
-        FROM orders
-        WHERE user_id = #{userId}
-        ORDER BY created_at DESC
-        """)
-    List<Order> selectByUserId(Long userId);
+    SELECT *
+    FROM orders
+    WHERE user_id = #{userId}
+      AND request_id = #{requestId}
+    LIMIT 1
+    """)
+    Order selectByUserIdAndRequestId(
+            @Param("userId") Long userId,
+            @Param("requestId") String requestId
+    );
 
     @Select("""
             SELECT *
@@ -159,5 +175,33 @@ public interface OrderMapper {
             Long orderId,
             Long userId,
             Integer status
+    );
+
+    @Update("""
+    UPDATE orders
+    SET status = #{newStatus}
+    WHERE id = #{orderId}
+      AND status = #{currentStatus}
+    """)
+    int timeoutCancelOrder(
+            @Param("orderId") Long orderId,
+            @Param("currentStatus") Integer currentStatus,
+            @Param("newStatus") Integer newStatus
+    );
+
+    @Select("""
+    SELECT id
+    FROM orders
+    WHERE status = #{status}
+      AND created_at < DATE_SUB(
+            NOW(),
+            INTERVAL 30 MINUTE
+      )
+    ORDER BY id
+    LIMIT #{limit}
+    """)
+    List<Long> selectExpiredPendingOrderIds(
+            @Param("status") Integer status,
+            @Param("limit") Integer limit
     );
 }

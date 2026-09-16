@@ -2,11 +2,12 @@ package com.dianping.controller;
 
 import com.dianping.common.PageResult;
 import com.dianping.common.Result;
+import com.dianping.dto.CreateOrderDTO;
 import com.dianping.entity.Order;
-import com.dianping.exception.BusinessException;
 import com.dianping.service.OrderService;
 import com.dianping.vo.OrderDetailVO;
 import io.swagger.v3.oas.annotations.tags.Tag;
+import jakarta.servlet.http.HttpServletRequest;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.web.bind.annotation.*;
 
@@ -20,11 +21,19 @@ public class OrderController {
     @Autowired
     private OrderService orderService;
 
-    @PostMapping
+    @PostMapping("/create")
     public Result<Long> createOrder(
-            @RequestAttribute("userId") Long userId) {
+            @RequestBody CreateOrderDTO dto,
+            HttpServletRequest request) {
 
-        Long orderId = orderService.createOrder(userId);
+        Long userId =
+                (Long) request.getAttribute("userId");
+
+        Long orderId =
+                orderService.createOrder(
+                        userId,
+                        dto.getRequestId()
+                );
 
         return Result.success(orderId);
     }

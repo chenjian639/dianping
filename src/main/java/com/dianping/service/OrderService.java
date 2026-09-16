@@ -9,13 +9,12 @@ import com.dianping.vo.CartItemVO;
 import com.dianping.vo.OrderDetailVO;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.dao.DuplicateKeyException;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.math.BigDecimal;
-import java.util.HashMap;
-import java.util.List;
-import java.util.Map;
+import java.util.*;
 
 @Slf4j
 @Service
@@ -33,9 +32,57 @@ public class OrderService {
     @Autowired
     private OrderItemMapper orderItemMapper;
 
-    @Transactional
-    public Long createOrder(Long userId) {
+    @Autowired
+    private OutboxEventMapper outboxEventMapper;
 
+    private void createOrderTimeoutEvent(
+            Long orderId) {
+
+        OutboxEvent event = new OutboxEvent();
+
+        event.setEventId(
+                UUID.randomUUID().toString()
+        );
+
+        event.setEventType(
+                "ORDER_TIMEOUT_CHECK"
+        );
+
+        event.setAggregateId(orderId);
+
+        event.setPayload(
+                String.valueOf(orderId)
+        );
+
+        event.setStatus("PENDING");
+        event.setRetryCount(0);
+
+        outboxEventMapper.insert(event);
+    }
+
+    @Transactional
+    public Long createOrder(
+            Long userId,
+            String requestId) {
+
+        if (requestId == null || requestId.isBlank()) {
+            throw new BusinessException(
+                    "requestId不能为空"
+            );
+        }
+
+        // 1. 已经成功创建过，直接返回
+        Order existing =
+                orderMapper.selectByUserIdAndRequestId(
+                        userId,
+                        requestId
+                );
+
+        if (existing != null) {
+            return existing.getId();
+        }
+
+        // 2. 查询购物车
         List<CartItemVO> cartItems =
                 cartItemMapper.selectCartByUserId(userId);
 
@@ -43,56 +90,100 @@ public class OrderService {
             throw new BusinessException("购物车为空");
         }
 
-        BigDecimal totalAmount = BigDecimal.ZERO;
+        // 3. 固定库存锁顺序
+        cartItems.sort(
+                Comparator.comparing(
+                        CartItemVO::getDishId
+                )
+        );
+
+        BigDecimal totalAmount =
+                BigDecimal.ZERO;
 
         Long restaurantId = null;
-        Map<Long, Dish> dishesById = new HashMap<>();
 
+        Map<Long, Dish> dishesById =
+                new HashMap<>();
+
+        // 4. 校验并生成下单快照
         for (CartItemVO cartItem : cartItems) {
 
-            Dish dish = dishMapper.selectById(cartItem.getDishId());
-            dishesById.put(cartItem.getDishId(), dish);
+            Dish dish =
+                    dishMapper.selectById(
+                            cartItem.getDishId()
+                    );
 
-            if (dish == null || dish.getStatus() != 1) {
-                throw new BusinessException("存在无效或下架菜品");
-            }
+            if (dish == null ||
+                    dish.getStatus() != 1) {
 
-            if (dish.getStock() < cartItem.getQuantity()) {
                 throw new BusinessException(
-                        dish.getName() + "库存不足"
+                        "存在无效或下架菜品"
                 );
             }
 
+            dishesById.put(
+                    dish.getId(),
+                    dish
+            );
+
             if (restaurantId == null) {
-                restaurantId = dish.getRestaurantId();
-            } else if (!restaurantId.equals(dish.getRestaurantId())) {
-                throw new BusinessException("一次订单只能购买同一家商家的菜品");
+
+                restaurantId =
+                        dish.getRestaurantId();
+
+            } else if (!restaurantId.equals(
+                    dish.getRestaurantId())) {
+
+                throw new BusinessException(
+                        "一次订单只能购买同一家商家的菜品"
+                );
             }
 
-            BigDecimal itemAmount =
-                    dish.getPrice().multiply(
-                            BigDecimal.valueOf(cartItem.getQuantity())
+            totalAmount =
+                    totalAmount.add(
+                            dish.getPrice().multiply(
+                                    BigDecimal.valueOf(
+                                            cartItem.getQuantity()
+                                    )
+                            )
                     );
-
-            totalAmount = totalAmount.add(itemAmount);
         }
 
+        // 5. 先写订单，抢占幂等键
         Order order = new Order();
+
         order.setUserId(userId);
         order.setRestaurantId(restaurantId);
         order.setTotalAmount(totalAmount);
-        order.setStatus(0);
+        order.setStatus(
+                OrderStatus.PENDING_PAYMENT.getCode()
+        );
+        order.setRequestId(requestId);
 
-        orderMapper.insert(order);
+        try {
 
+            orderMapper.insert(order);
+
+        } catch (DuplicateKeyException e) {
+
+            throw new BusinessException(
+                    "订单正在创建，请勿重复提交"
+            );
+        }
+
+        // 6. 原子扣库存 + 创建快照
         for (CartItemVO cartItem : cartItems) {
 
-            Dish dish = dishesById.get(cartItem.getDishId());
+            Dish dish =
+                    dishesById.get(
+                            cartItem.getDishId()
+                    );
 
-            int rows = dishMapper.decreaseStock(
-                    dish.getId(),
-                    cartItem.getQuantity()
-            );
+            int rows =
+                    dishMapper.decreaseStock(
+                            dish.getId(),
+                            cartItem.getQuantity()
+                    );
 
             if (rows == 0) {
                 throw new BusinessException(
@@ -100,23 +191,24 @@ public class OrderService {
                 );
             }
 
-            OrderItem orderItem = new OrderItem();
+            OrderItem orderItem =
+                    new OrderItem();
+
             orderItem.setOrderId(order.getId());
             orderItem.setDishId(dish.getId());
             orderItem.setDishName(dish.getName());
             orderItem.setPrice(dish.getPrice());
-            orderItem.setQuantity(cartItem.getQuantity());
+            orderItem.setQuantity(
+                    cartItem.getQuantity()
+            );
 
             orderItemMapper.insert(orderItem);
         }
 
+        // 7. 清购物车
         cartItemMapper.deleteByUserId(userId);
-        log.info(
-                "订单创建成功, orderId={}, userId={}, restaurantId={}, totalAmount={}",
-                order.getId(),
-                userId,
-                order.getRestaurantId(),
-                order.getTotalAmount()
+        createOrderTimeoutEvent(
+                order.getId()
         );
 
         return order.getId();
@@ -327,5 +419,53 @@ public class OrderService {
         return vo;
     }
 
+    @Transactional
+    public void timeoutCancelOrder(Long orderId) {
+
+        int rows =
+                orderMapper.timeoutCancelOrder(
+                        orderId,
+                        OrderStatus.PENDING_PAYMENT.getCode(),
+                        OrderStatus.CANCELED.getCode()
+                );
+
+        // 已经支付、已取消、已处理……
+        // 都属于正常情况，不应该让MQ重试
+        if (rows == 0) {
+
+            log.info(
+                    "订单无需超时取消，可能已支付或已取消, orderId={}",
+                    orderId
+            );
+
+            return;
+        }
+
+        // 只有真正从待支付 -> 已取消的那个线程
+        // 才允许恢复库存
+        List<OrderItem> items =
+                orderItemMapper.selectByOrderId(orderId);
+
+        for (OrderItem item : items) {
+
+            int affected =
+                    dishMapper.increaseStock(
+                            item.getDishId(),
+                            item.getQuantity()
+                    );
+
+            if (affected == 0) {
+                throw new BusinessException(
+                        "恢复库存失败, dishId=" +
+                                item.getDishId()
+                );
+            }
+        }
+
+        log.info(
+                "订单超时取消成功并恢复库存, orderId={}",
+                orderId
+        );
+    }
 
 }

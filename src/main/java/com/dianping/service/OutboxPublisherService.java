@@ -58,36 +58,62 @@ public class OutboxPublisherService {
             try {
 
                 CorrelationData correlationData =
-                        new CorrelationData(event.getEventId());
+                        new CorrelationData(
+                                event.getEventId()
+                        );
 
-                rabbitTemplate.convertAndSend(
-                        "",
-                        RabbitMQConfig.RESTAURANT_CACHE_EVICT_QUEUE,
-                        event.getAggregateId(),
+                publishEvent(
+                        event,
                         correlationData
                 );
 
                 CorrelationData.Confirm confirm =
                         correlationData.getFuture()
-                                .get(5, TimeUnit.SECONDS);
+                                .get(
+                                        5,
+                                        TimeUnit.SECONDS
+                                );
 
-                if (confirm.isAck()) {
+                if (!confirm.isAck()) {
 
-                    outboxEventMapper.markSent(event.getId());
-
-                    log.info(
-                            "Outbox投递成功并标记SENT, eventId={}",
-                            event.getEventId()
+                    handleFailure(
+                            event,
+                            "Confirm NACK: "
+                                    + confirm.getReason()
                     );
 
-                } else {
-                    handleFailure(event,
-                            "Confirm NACK: " + confirm.getReason());
+                    continue;
                 }
+
+                if (correlationData.getReturned() != null) {
+
+                    handleFailure(
+                            event,
+                            "消息无法路由: "
+                                    + correlationData
+                                    .getReturned()
+                                    .getReplyText()
+                    );
+
+                    continue;
+                }
+
+                outboxEventMapper.markSent(
+                        event.getId()
+                );
+
+                log.info(
+                        "Outbox投递成功并标记SENT, eventId={}, eventType={}",
+                        event.getEventId(),
+                        event.getEventType()
+                );
 
             } catch (Exception e) {
 
-                handleFailure(event, e.getMessage());
+                handleFailure(
+                        event,
+                        e.getMessage()
+                );
             }
         }
     }
@@ -131,6 +157,42 @@ public class OutboxPublisherService {
             log.warn(
                     "恢复超时PROCESSING Outbox事件, count={}",
                     recovered
+            );
+        }
+    }
+
+    private void publishEvent(
+            OutboxEvent event,
+            CorrelationData correlationData) {
+
+        switch (event.getEventType()) {
+
+            case "RESTAURANT_CACHE_EVICT" ->
+
+                    rabbitTemplate.convertAndSend(
+                            "",
+                            RabbitMQConfig
+                                    .RESTAURANT_CACHE_EVICT_QUEUE,
+                            event.getAggregateId(),
+                            correlationData
+                    );
+
+
+            case "ORDER_TIMEOUT_CHECK" ->
+
+                    rabbitTemplate.convertAndSend(
+                            RabbitMQConfig
+                                    .ORDER_TIMEOUT_DELAY_EXCHANGE,
+                            RabbitMQConfig
+                                    .ORDER_TIMEOUT_DELAY_ROUTING_KEY,
+                            event.getAggregateId(),
+                            correlationData
+                    );
+
+
+            default -> throw new IllegalArgumentException(
+                    "未知Outbox事件类型: "
+                            + event.getEventType()
             );
         }
     }
