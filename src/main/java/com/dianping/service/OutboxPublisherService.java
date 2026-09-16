@@ -6,6 +6,7 @@ import com.dianping.mapper.OutboxEventMapper;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.amqp.rabbit.connection.CorrelationData;
 import org.springframework.amqp.rabbit.core.RabbitTemplate;
+import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
 
 import java.util.List;
@@ -17,6 +18,11 @@ public class OutboxPublisherService {
 
     private final OutboxEventMapper outboxEventMapper;
     private final RabbitTemplate rabbitTemplate;
+
+    @Scheduled(fixedDelay = 5000)
+    public void publishPendingScheduled() {
+        publishPending();
+    }
 
     public OutboxPublisherService(
             OutboxEventMapper outboxEventMapper,
@@ -71,13 +77,18 @@ public class OutboxPublisherService {
 
             } catch (Exception e) {
 
-                outboxEventMapper.incrementRetry(event.getId());
+                int retryCount = event.getRetryCount() + 1;
 
-                log.error(
-                        "Outbox投递失败, eventId={}, error={}",
-                        event.getEventId(),
-                        e.getMessage()
-                );
+                if (retryCount >= 5) {
+                    outboxEventMapper.markFailed(event.getId());
+
+                    log.error(
+                            "Outbox超过最大重试次数，标记FAILED, eventId={}",
+                            event.getEventId()
+                    );
+                } else {
+                    outboxEventMapper.incrementRetry(event.getId());
+                }
             }
         }
     }

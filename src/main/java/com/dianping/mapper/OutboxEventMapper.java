@@ -45,4 +45,12 @@ public interface OutboxEventMapper {
     WHERE id = #{id}
     """)
     int incrementRetry(Long id);
+
+    @Update("""
+    UPDATE outbox_event
+    SET status = 'FAILED',
+        updated_at = NOW()
+    WHERE id = #{id}
+    """)
+    int markFailed(Long id);
 }
