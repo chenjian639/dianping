@@ -1,7 +1,6 @@
 package com.dianping.service;
 
 import com.dianping.common.PageResult;
-import com.dianping.config.RabbitMQConfig;
 import com.dianping.dto.UpdateRestaurantDTO;
 import com.dianping.entity.OutboxEvent;
 import com.dianping.entity.Restaurant;
@@ -15,8 +14,6 @@ import com.dianping.vo.RestaurantSearchVO;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.extern.slf4j.Slf4j;
-import org.springframework.amqp.rabbit.connection.CorrelationData;
-import org.springframework.amqp.rabbit.core.RabbitTemplate;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.stereotype.Service;
@@ -42,8 +39,6 @@ public class RestaurantService {
     private StringRedisTemplate stringRedisTemplate;
     @Autowired
     private ObjectMapper objectMapper;
-    @Autowired
-    private RabbitTemplate rabbitTemplate;
     @Autowired
     private  OutboxEventMapper outboxEventMapper;
 
@@ -240,11 +235,19 @@ public class RestaurantService {
                         + pageSize;
 
         // 2. 先查 Redis
-        String cached =
-                stringRedisTemplate
-                        .opsForValue()
-                        .get(cacheKey);
+        String cached = null;
 
+        try {
+            cached = stringRedisTemplate
+                    .opsForValue()
+                    .get(cacheKey);
+        } catch (Exception e) {
+            log.warn(
+                    "读取餐厅搜索缓存失败，降级查询数据库, cacheKey={}, error={}",
+                    cacheKey,
+                    e.getMessage()
+            );
+        }
         if (cached != null) {
             try {
                 return objectMapper.readValue(
@@ -257,9 +260,10 @@ public class RestaurantService {
                                 )
                 );
             } catch (JsonProcessingException e) {
-                throw new RuntimeException(
-                        "搜索缓存反序列化失败",
-                        e
+                log.warn(
+                        "餐厅搜索缓存反序列化失败，按缓存未命中处理, cacheKey={}, error={}",
+                        cacheKey,
+                        e.getMessage()
                 );
             }
         }
@@ -299,9 +303,7 @@ public class RestaurantService {
         try {
 
             String json =
-                    objectMapper.writeValueAsString(
-                            result
-                    );
+                    objectMapper.writeValueAsString(result);
 
             stringRedisTemplate
                     .opsForValue()
@@ -312,11 +314,12 @@ public class RestaurantService {
                             TimeUnit.MINUTES
                     );
 
-        } catch (JsonProcessingException e) {
+        } catch (Exception e) {
 
-            throw new RuntimeException(
-                    "搜索缓存序列化失败",
-                    e
+            log.warn(
+                    "写入餐厅搜索缓存失败，不影响本次搜索结果, cacheKey={}, error={}",
+                    cacheKey,
+                    e.getMessage()
             );
         }
 
@@ -338,52 +341,8 @@ public class RestaurantService {
         if (rows == 0) {
             throw new BusinessException("餐厅不存在");
         }
-        // 2. 同一个事务写Outbox
-        OutboxEvent event = new OutboxEvent();
 
-        event.setEventId(UUID.randomUUID().toString());
-        event.setEventType("RESTAURANT_CACHE_EVICT");
-        event.setAggregateId(restaurantId);
-        event.setPayload(String.valueOf(restaurantId));
-        event.setStatus("PENDING");
-        event.setRetryCount(0);
-
-        outboxEventMapper.insert(event);
-
-
-    }
-
-    private void sendCacheEvictMessage(Long restaurantId) {
-
-        String messageId = UUID.randomUUID().toString();
-
-        CorrelationData correlationData =
-                new CorrelationData(messageId);
-
-        try {
-
-            rabbitTemplate.convertAndSend(
-                    "",
-                    RabbitMQConfig.RESTAURANT_CACHE_EVICT_QUEUE,
-                    restaurantId,
-                    correlationData
-            );
-
-            log.info(
-                    "缓存失效补偿消息已提交发送, restaurantId={}, messageId={}",
-                    restaurantId,
-                    messageId
-            );
-
-        } catch (Exception e) {
-
-            log.error(
-                    "缓存失效补偿消息发送异常, restaurantId={}, messageId={}, error={}",
-                    restaurantId,
-                    messageId,
-                    e.getMessage()
-            );
-        }
+        createRestaurantCacheEvictEvent(restaurantId);
     }
 
     public void updateRestaurantStatus(
@@ -406,5 +365,28 @@ public class RestaurantService {
                     "餐厅不存在"
             );
         }
+
+        createRestaurantCacheEvictEvent(restaurantId);
+    }
+
+    private void createRestaurantCacheEvictEvent(
+            Long restaurantId) {
+
+        OutboxEvent event = new OutboxEvent();
+
+        event.setEventId(UUID.randomUUID().toString());
+        event.setEventType("RESTAURANT_CACHE_EVICT");
+        event.setAggregateId(restaurantId);
+        event.setPayload(String.valueOf(restaurantId));
+        event.setStatus("PENDING");
+        event.setRetryCount(0);
+
+        outboxEventMapper.insert(event);
+
+        log.info(
+                "创建餐厅缓存失效Outbox事件, restaurantId={}, eventId={}",
+                restaurantId,
+                event.getEventId()
+        );
     }
 }
