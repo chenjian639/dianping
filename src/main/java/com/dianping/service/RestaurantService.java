@@ -4,6 +4,7 @@ import com.dianping.common.PageResult;
 import com.dianping.dto.UpdateRestaurantDTO;
 import com.dianping.entity.OutboxEvent;
 import com.dianping.entity.Restaurant;
+import com.dianping.event.RestaurantChangedEvent;
 import com.dianping.exception.BusinessException;
 import com.dianping.mapper.OutboxEventMapper;
 import com.dianping.mapper.RestaurantMapper;
@@ -15,6 +16,7 @@ import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -39,11 +41,17 @@ public class RestaurantService {
     private ObjectMapper objectMapper;
     @Autowired
     private  OutboxEventMapper outboxEventMapper;
+    @Autowired
+    private RestaurantCacheService restaurantCacheService;
+    @Autowired
+    private RestaurantLocalCacheService restaurantLocalCacheService;
+    @Autowired
+    private ApplicationEventPublisher applicationEventPublisher;
+    @Autowired
+    private RestaurantDatabaseService restaurantDatabaseService;
+// 下面直接用了 applicationEventPublisher，但没有声明这个字段
 
-    private volatile long redisDisabledUntil = 0L;
-    private static final long REDIS_COOLDOWN_MS = 10_000;
-
-    private static final String RESTAURANT_DETAIL_KEY_PREFIX =
+    static final String RESTAURANT_DETAIL_KEY_PREFIX =
             "restaurant:detail:";
 
     private static final String NULL_CACHE_VALUE =
@@ -69,116 +77,109 @@ public class RestaurantService {
 
     public RestaurantDetailVO getRestaurantDetail(Long id) {
 
-        String key = RESTAURANT_DETAIL_KEY_PREFIX + id;
-        boolean redisAvailable = isRedisAvailable();;
+        return restaurantLocalCacheService.getOrLoad(
+                id,
+                this::loadRestaurantDetail
+        );
+    }
 
-        // 1. 尝试读取 Redis
+    private RestaurantDetailVO loadRestaurantDetail(Long id) {
+
+        String key =
+                RESTAURANT_DETAIL_KEY_PREFIX + id;
+
+        boolean redisAvailable = true;
         String json = null;
-        long redisGetStart = System.currentTimeMillis();
+
+        // 1. L2 Redis
         try {
-            json = stringRedisTemplate.opsForValue().get(key);
+
+            json = restaurantCacheService.get(key);
+
         } catch (Exception e) {
+
             redisAvailable = false;
+
             log.warn(
-                    "读取餐厅详情缓存失败，降级查询数据库, restaurantId={}, cost={}ms,error={}",
+                    "读取餐厅详情Redis缓存失败，降级数据库, restaurantId={}, error={}",
                     id,
-                    System.currentTimeMillis() - redisGetStart,
                     e.getMessage()
             );
         }
 
-        // 2. Redis 正常且命中缓存
+        // 2. Redis HIT
         if (json != null) {
 
             if (NULL_CACHE_VALUE.equals(json)) {
-                log.debug(
-                        "命中餐厅空值缓存, restaurantId={}",
-                        id
+                throw new BusinessException(
+                        "餐厅不存在"
                 );
-
-                throw new BusinessException("餐厅不存在");
             }
 
             try {
+
                 return objectMapper.readValue(
                         json,
                         RestaurantDetailVO.class
                 );
+
             } catch (JsonProcessingException e) {
+
                 log.warn(
-                        "餐厅详情缓存反序列化失败，降级查询数据库, restaurantId={}, error={}",
+                        "餐厅详情Redis缓存反序列化失败，降级数据库, restaurantId={}, error={}",
                         id,
                         e.getMessage()
                 );
             }
         }
 
-        // 3. Redis MISS / Redis 故障 / 缓存数据异常
-        log.debug(
-                "查询数据库获取餐厅详情, restaurantId={}",
-                id
-        );
+        // 3. Redis MISS / Redis故障 → DB
+        RestaurantDetailVO vo;
 
-        long dbStart = System.currentTimeMillis();
-        Restaurant restaurant =
-                restaurantMapper.selectById(id);
+        try {
 
-        log.info(
-                "查询餐厅数据库完成, restaurantId={}, cost={}ms",
-                id,
-                System.currentTimeMillis() - dbStart
-        );
+            vo = restaurantDatabaseService
+                    .loadRestaurantDetail(id);
 
-        // 4. MySQL 中也不存在
-        if (restaurant == null) {
+        } catch (
+                io.github.resilience4j.bulkhead.BulkheadFullException e) {
+
+            log.warn(
+                    "餐厅详情数据库回源并发已满, restaurantId={}",
+                    id
+            );
+
+            throw new BusinessException(
+                    "系统繁忙，请稍后重试"
+            );
+
+        } catch (BusinessException e) {
+
+            // DB中确实不存在
             if (redisAvailable) {
+
                 try {
-                    stringRedisTemplate
-                            .opsForValue()
-                            .set(
-                                    key,
-                                    NULL_CACHE_VALUE,
-                                    5,
-                                    TimeUnit.MINUTES
-                            );
-                } catch (Exception e) {
+                    restaurantCacheService.set(
+                            key,
+                            NULL_CACHE_VALUE,
+                            5,
+                            TimeUnit.MINUTES
+                    );
+                } catch (Exception cacheException) {
                     log.warn(
                             "写入餐厅空值缓存失败, restaurantId={}, error={}",
                             id,
-                            e.getMessage()
+                            cacheException.getMessage()
                     );
                 }
             }
-            throw new BusinessException("餐厅不存在");
+
+            throw e;
         }
 
-        // 5. 查询评价统计
-        long reviewStart = System.currentTimeMillis();
+        // 4. 回填 Redis
+        if (redisAvailable) {
 
-        RestaurantReviewSummaryVO summary =
-                reviewService.getRestaurantReviewSummary(id);
-
-        log.info(
-                "查询评价统计完成, restaurantId={}, cost={}ms",
-                id,
-                System.currentTimeMillis() - reviewStart
-        );
-
-        // 6. 组装 VO
-        RestaurantDetailVO vo =
-                new RestaurantDetailVO();
-
-        vo.setId(restaurant.getId());
-        vo.setName(restaurant.getName());
-        vo.setDescription(restaurant.getDescription());
-        vo.setAddress(restaurant.getAddress());
-        vo.setStatus(restaurant.getStatus());
-        vo.setAverageRating(summary.getAverageRating());
-        vo.setReviewCount(summary.getReviewCount());
-
-        // 7. 尝试写 Redis
-        long redisSetStart = System.currentTimeMillis();
-        if(redisAvailable) {
             try {
 
                 String value =
@@ -188,31 +189,25 @@ public class RestaurantService {
                         30 + ThreadLocalRandom.current()
                                 .nextLong(0, 11);
 
-                stringRedisTemplate
-                        .opsForValue()
-                        .set(
-                                key,
-                                value,
-                                ttlMinutes,
-                                TimeUnit.MINUTES
-                        );
+                restaurantCacheService.set(
+                        key,
+                        value,
+                        ttlMinutes,
+                        TimeUnit.MINUTES
+                );
 
             } catch (Exception e) {
 
                 log.warn(
-                        "写入餐厅详情缓存失败，不影响本次查询结果, restaurantId={}, cost={}ms, error={}",
+                        "回填餐厅详情Redis缓存失败，不影响业务结果, restaurantId={}, error={}",
                         id,
-                        System.currentTimeMillis() - redisSetStart,
                         e.getMessage()
                 );
             }
-        }else {
-
-            log.debug(
-                    "Redis本次请求已判定不可用，跳过缓存写入, restaurantId={}",
-                    id
-            );
         }
+
+        // 不需要手工 put Caffeine
+        // cache.get(id, loader) 会把这里返回的 vo 自动写入 L1
 
         return vo;
     }
@@ -252,7 +247,6 @@ public class RestaurantService {
             );
         }
 
-        boolean redisAvailable = isRedisAvailable();;
         // 1. 生成缓存 key
         String cacheKey =
                 RESTAURANT_SEARCH_KEY_PREFIX
@@ -268,11 +262,9 @@ public class RestaurantService {
         String cached = null;
 
         try {
-            cached = stringRedisTemplate
-                    .opsForValue()
-                    .get(cacheKey);
+            cached = restaurantCacheService.get(cacheKey);
+
         } catch (Exception e) {
-            redisAvailable = false;
             log.warn(
                     "读取餐厅搜索缓存失败，降级查询数据库, cacheKey={}, error={}",
                     cacheKey,
@@ -331,27 +323,24 @@ public class RestaurantService {
         result.setRecords(records);
 
         // 4. 写入 Redis
-        if (redisAvailable) {
-            try {
-                String json =
-                        objectMapper.writeValueAsString(result);
 
-                stringRedisTemplate
-                        .opsForValue()
-                        .set(
-                                cacheKey,
-                                json,
-                                SEARCH_CACHE_TTL_MINUTES,
-                                TimeUnit.MINUTES
-                        );
+        try {
+            String json =
+                    objectMapper.writeValueAsString(result);
 
-            } catch (Exception e) {
-                log.warn(
-                        "写入餐厅搜索缓存失败，不影响本次搜索结果, cacheKey={}, error={}",
-                        cacheKey,
-                        e.getMessage()
-                );
-            }
+            restaurantCacheService.set(
+                            cacheKey,
+                            json,
+                            SEARCH_CACHE_TTL_MINUTES,
+                            TimeUnit.MINUTES
+                    );
+
+        } catch (Exception e) {
+            log.warn(
+                    "写入餐厅搜索缓存失败，不影响本次搜索结果, cacheKey={}, error={}",
+                    cacheKey,
+                    e.getMessage()
+            );
         }
 
         return result;
@@ -374,6 +363,9 @@ public class RestaurantService {
         }
 
         createRestaurantCacheEvictEvent(restaurantId);
+        applicationEventPublisher.publishEvent(
+                new RestaurantChangedEvent(restaurantId)
+        );
     }
 
     public void updateRestaurantStatus(
@@ -398,6 +390,8 @@ public class RestaurantService {
         }
 
         createRestaurantCacheEvictEvent(restaurantId);
+        // 3. 发事件（事务提交后删本实例本地缓存）
+        applicationEventPublisher.publishEvent(new RestaurantChangedEvent(restaurantId));
     }
 
     private void createRestaurantCacheEvictEvent(
@@ -419,15 +413,5 @@ public class RestaurantService {
                 restaurantId,
                 event.getEventId()
         );
-    }
-
-    private boolean isRedisAvailable() {
-        return System.currentTimeMillis() >= redisDisabledUntil;
-    }
-
-    private void markRedisUnavailable() {
-        redisDisabledUntil =
-                System.currentTimeMillis()
-                        + REDIS_COOLDOWN_MS;
     }
 }

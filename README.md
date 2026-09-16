@@ -382,3 +382,7 @@ total 分页 → hasNext 分页
 ````
 
 热点搜索采用 Redis Cache Aside，key 由 keyword、sort、page、pageSize 组合，TTL 2 分钟；在 20 并发、1000 请求、重复热点查询场景下，平均响应由 213ms 降至 5ms，P95 由 426ms 降至 10ms，吞吐由 66.8 req/s 提升至 197.6 req/s。
+
+Redis 故障时我先实现了缓存降级，保证查询可以回源 MySQL。之后通过故障注入发现每个请求仍会等待 Redis 命令超时，所以把 Redis timeout 调低，
+并在一次请求中如果读缓存失败就跳过后续缓存写入，把故障请求从约 6 秒降到约 400ms。进一步为了避免 Redis 长时间不可用时每个请求都重复等待超时，
+我增加了短时间依赖熔断，在冷却窗口内直接跳过 Redis，再周期性探测恢复。
