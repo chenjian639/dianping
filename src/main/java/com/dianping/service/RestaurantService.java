@@ -341,8 +341,7 @@ public class RestaurantService {
         // 2. 同一个事务写Outbox
         OutboxEvent event = new OutboxEvent();
 
-        //event.setEventId(UUID.randomUUID().toString());
-        event.setEventId(null);
+        event.setEventId(UUID.randomUUID().toString());
         event.setEventType("RESTAURANT_CACHE_EVICT");
         event.setAggregateId(restaurantId);
         event.setPayload(String.valueOf(restaurantId));

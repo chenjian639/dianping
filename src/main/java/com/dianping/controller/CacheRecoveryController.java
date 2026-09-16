@@ -2,6 +2,7 @@ package com.dianping.controller;
 
 import com.dianping.common.Result;
 import com.dianping.service.CacheRecoveryService;
+import com.dianping.service.OutboxPublisherService;
 import org.springframework.web.bind.annotation.*;
 
 @RestController
@@ -9,10 +10,12 @@ import org.springframework.web.bind.annotation.*;
 public class CacheRecoveryController {
 
     private final CacheRecoveryService cacheRecoveryService;
+    private final OutboxPublisherService outboxPublisherService;
 
     public CacheRecoveryController(
-            CacheRecoveryService cacheRecoveryService) {
+            CacheRecoveryService cacheRecoveryService, OutboxPublisherService outboxPublisherService) {
         this.cacheRecoveryService = cacheRecoveryService;
+        this.outboxPublisherService = outboxPublisherService;
     }
 
     @PostMapping("/start")
@@ -37,5 +40,13 @@ public class CacheRecoveryController {
         cacheRecoveryService.sendRoutingFailureTest();
 
         return Result.success("routing failure test sent");
+    }
+
+    @PostMapping("/outbox/publish")
+    public Result<String> publishOutbox() {
+
+        outboxPublisherService.publishPending();
+
+        return Result.success("outbox publish finished");
     }
 }
