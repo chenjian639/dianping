@@ -18,8 +18,6 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
-
-import java.math.BigDecimal;
 import java.util.List;
 import java.util.UUID;
 import java.util.concurrent.ThreadLocalRandom;
@@ -41,6 +39,9 @@ public class RestaurantService {
     private ObjectMapper objectMapper;
     @Autowired
     private  OutboxEventMapper outboxEventMapper;
+
+    private volatile long redisDisabledUntil = 0L;
+    private static final long REDIS_COOLDOWN_MS = 10_000;
 
     private static final String RESTAURANT_DETAIL_KEY_PREFIX =
             "restaurant:detail:";
@@ -69,7 +70,7 @@ public class RestaurantService {
     public RestaurantDetailVO getRestaurantDetail(Long id) {
 
         String key = RESTAURANT_DETAIL_KEY_PREFIX + id;
-        boolean redisAvailable = true;
+        boolean redisAvailable = isRedisAvailable();;
 
         // 1. 尝试读取 Redis
         String json = null;
@@ -251,7 +252,7 @@ public class RestaurantService {
             );
         }
 
-        boolean redisAvailable = true;
+        boolean redisAvailable = isRedisAvailable();;
         // 1. 生成缓存 key
         String cacheKey =
                 RESTAURANT_SEARCH_KEY_PREFIX
@@ -418,5 +419,15 @@ public class RestaurantService {
                 restaurantId,
                 event.getEventId()
         );
+    }
+
+    private boolean isRedisAvailable() {
+        return System.currentTimeMillis() >= redisDisabledUntil;
+    }
+
+    private void markRedisUnavailable() {
+        redisDisabledUntil =
+                System.currentTimeMillis()
+                        + REDIS_COOLDOWN_MS;
     }
 }
