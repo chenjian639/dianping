@@ -34,7 +34,7 @@ public interface OutboxEventMapper {
     SET status = 'SENT',
         updated_at = NOW()
     WHERE id = #{id}
-      AND status = 'PENDING'
+      AND status = 'PROCESSING'
     """)
     int markSent(Long id);
 
@@ -49,8 +49,29 @@ public interface OutboxEventMapper {
     @Update("""
     UPDATE outbox_event
     SET status = 'FAILED',
+        retry_count = retry_count + 1,
         updated_at = NOW()
     WHERE id = #{id}
+      AND status = 'PROCESSING'
     """)
     int markFailed(Long id);
+
+    @Update("""
+    UPDATE outbox_event
+    SET status = 'PROCESSING',
+        updated_at = NOW()
+    WHERE id = #{id}
+      AND status = 'PENDING'
+    """)
+    int tryClaim(Long id);
+
+    @Update("""
+    UPDATE outbox_event
+    SET status = 'PENDING',
+        retry_count = retry_count + 1,
+        updated_at = NOW()
+    WHERE id = #{id}
+      AND status = 'PROCESSING'
+    """)
+    int releaseForRetry(Long id);
 }

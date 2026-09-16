@@ -39,6 +39,17 @@ public class OutboxPublisherService {
 
         for (OutboxEvent event : events) {
 
+            // 先抢占
+            int claimed = outboxEventMapper.tryClaim(event.getId());
+
+            if (claimed == 0) {
+                log.info(
+                        "Outbox事件已被其他实例抢占，跳过, eventId={}",
+                        event.getEventId()
+                );
+                continue;
+            }
+
             try {
 
                 CorrelationData correlationData =
@@ -65,31 +76,43 @@ public class OutboxPublisherService {
                     );
 
                 } else {
-
-                    outboxEventMapper.incrementRetry(event.getId());
-
-                    log.error(
-                            "Outbox Confirm NACK, eventId={}, reason={}",
-                            event.getEventId(),
-                            confirm.getReason()
-                    );
+                    handleFailure(event,
+                            "Confirm NACK: " + confirm.getReason());
                 }
 
             } catch (Exception e) {
 
-                int retryCount = event.getRetryCount() + 1;
-
-                if (retryCount >= 5) {
-                    outboxEventMapper.markFailed(event.getId());
-
-                    log.error(
-                            "Outbox超过最大重试次数，标记FAILED, eventId={}",
-                            event.getEventId()
-                    );
-                } else {
-                    outboxEventMapper.incrementRetry(event.getId());
-                }
+                handleFailure(event, e.getMessage());
             }
+        }
+    }
+
+    private void handleFailure(
+            OutboxEvent event,
+            String reason) {
+
+        int nextRetryCount = event.getRetryCount() + 1;
+
+        if (nextRetryCount >= 5) {
+
+            outboxEventMapper.markFailed(event.getId());
+
+            log.error(
+                    "Outbox超过最大重试次数，标记FAILED, eventId={}, reason={}",
+                    event.getEventId(),
+                    reason
+            );
+
+        } else {
+
+            outboxEventMapper.releaseForRetry(event.getId());
+
+            log.warn(
+                    "Outbox投递失败，释放回PENDING等待重试, eventId={}, retryCount={}, reason={}",
+                    event.getEventId(),
+                    nextRetryCount,
+                    reason
+            );
         }
     }
 }
