@@ -31,8 +31,15 @@ CREATE TABLE restaurant (
                             address VARCHAR(255) DEFAULT NULL COMMENT '地址',
                             status TINYINT NOT NULL DEFAULT 1
                                 COMMENT '状态：1营业，0休息',
+                            -- 评分冗余统计字段，新增评价时同步维护，避免搜索时实时聚合
+                            average_rating DECIMAL(2, 1) NOT NULL DEFAULT 0.0 COMMENT '平均评分',
+                            review_count INT NOT NULL DEFAULT 0 COMMENT '评价数量',
                             created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
-                                COMMENT '创建时间'
+                                COMMENT '创建时间',
+
+                            INDEX idx_restaurant_status_created
+                                (status, created_at DESC, id DESC),
+                            FULLTEXT INDEX ft_restaurant_name_ngram (name) WITH PARSER ngram
 ) ENGINE=InnoDB
   DEFAULT CHARSET=utf8mb4
     COMMENT='商家表';
@@ -105,12 +112,15 @@ CREATE TABLE orders (
                         total_amount DECIMAL(10,2) NOT NULL COMMENT '订单总金额',
                         status TINYINT NOT NULL DEFAULT 0
                             COMMENT '订单状态：0待支付，1已支付，2制作中，3配送中，4已完成，5已取消',
+                        -- 客户端幂等键，与 user_id 组成唯一约束，防重复下单
+                        request_id VARCHAR(64) NOT NULL COMMENT '客户端幂等键',
                         created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
                             COMMENT '创建时间',
                         updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
                             ON UPDATE CURRENT_TIMESTAMP
                             COMMENT '更新时间',
 
+                        UNIQUE KEY uk_user_request (user_id, request_id),
                         INDEX idx_orders_user_created
                             (user_id, created_at DESC, id DESC),
                         INDEX idx_orders_restaurant_status_created
@@ -194,7 +204,27 @@ CREATE TABLE review (
   DEFAULT CHARSET=utf8mb4
     COMMENT='用户评价表';
 
-ALTER TABLE restaurant
-    ADD INDEX idx_restaurant_status_created
-        (status, created_at DESC, id DESC),
-    ADD FULLTEXT INDEX ft_restaurant_name_ngram (name) WITH PARSER ngram;
+
+-- =========================
+-- 8. Outbox 事件表（可靠投递）
+-- =========================
+CREATE TABLE outbox_event (
+                              id BIGINT PRIMARY KEY AUTO_INCREMENT COMMENT '自增ID',
+                              event_id VARCHAR(64) NOT NULL COMMENT '业务事件ID（幂等）',
+                              event_type VARCHAR(50) NOT NULL COMMENT '事件类型',
+                              aggregate_id BIGINT DEFAULT NULL COMMENT '聚合根ID',
+                              payload TEXT COMMENT '事件负载',
+                              status VARCHAR(20) NOT NULL DEFAULT 'PENDING'
+                                  COMMENT '状态：PENDING/PROCESSING/SENT/FAILED',
+                              retry_count INT NOT NULL DEFAULT 0 COMMENT '重试次数',
+                              processing_at DATETIME DEFAULT NULL COMMENT '开始处理时间，用于卡死恢复',
+                              created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
+                              updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+                                  ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+
+                              UNIQUE KEY uk_event_id (event_id),
+                              INDEX idx_outbox_status_id (status, id),
+                              INDEX idx_outbox_processing_at (processing_at)
+) ENGINE=InnoDB
+  DEFAULT CHARSET=utf8mb4
+    COMMENT='Outbox事件表';

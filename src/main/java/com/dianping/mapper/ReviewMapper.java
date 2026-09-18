@@ -32,13 +32,6 @@ public interface ReviewMapper {
     int insert(Review review);
 
     @Select("""
-        SELECT COUNT(*)
-        FROM review
-        WHERE order_id = #{orderId}
-        """)
-    int countByOrderId(Long orderId);
-
-    @Select("""
     SELECT
         r.id,
         u.nickname,

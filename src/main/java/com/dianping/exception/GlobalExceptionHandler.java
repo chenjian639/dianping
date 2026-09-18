@@ -3,6 +3,7 @@ package com.dianping.exception;
 import com.dianping.common.Result;
 import lombok.extern.slf4j.Slf4j;
 import org.apache.catalina.connector.ClientAbortException;
+import org.springframework.validation.FieldError;
 import org.springframework.web.bind.MethodArgumentNotValidException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
@@ -25,9 +26,13 @@ public class GlobalExceptionHandler {
     @ExceptionHandler(MethodArgumentNotValidException.class)
     public Result<Void> handleValidationException(MethodArgumentNotValidException e) {
 
-        String message = e.getBindingResult()
-                .getFieldError()
-                .getDefaultMessage();
+        FieldError fieldError =
+                e.getBindingResult().getFieldError();
+
+        String message =
+                fieldError != null
+                        ? fieldError.getDefaultMessage()
+                        : "参数校验失败";
 
 
 

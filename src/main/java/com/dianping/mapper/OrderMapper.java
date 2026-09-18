@@ -1,11 +1,9 @@
 package com.dianping.mapper;
 
-import com.dianping.entity.Dish;
 import com.dianping.entity.Order;
 import org.apache.ibatis.annotations.*;
 
 import java.util.List;
-
 @Mapper
 public interface OrderMapper {
 
@@ -110,36 +108,6 @@ public interface OrderMapper {
             Integer currentStatus,
             Integer newStatus
     );
-
-    @Select("""
-    SELECT *
-    FROM dish
-    WHERE restaurant_id = #{restaurantId}
-      AND status = 1
-      AND deleted = 0
-    """)
-    List<Dish> selectByRestaurantId(Long restaurantId);
-
-    @Select("""
-            SELECT *
-            FROM orders
-            WHERE restaurant_id = #{restaurantId}
-            ORDER BY created_at DESC
-            LIMIT #{pageSize}
-            OFFSET #{offset}
-            """)
-    List<Order> selectByRestaurantIdPage(
-            Long restaurantId,
-            Integer offset,
-            Integer pageSize
-    );
-
-    @Select("""
-            SELECT COUNT(*)
-            FROM orders
-            WHERE restaurant_id = #{restaurantId}
-            """)
-    Long countByRestaurantId(Long restaurantId);
 
     List<Order> selectMerchantOrdersPage(
             Long restaurantId,

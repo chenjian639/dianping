@@ -14,7 +14,7 @@ import org.mockito.ArgumentCaptor;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
-import org.springframework.data.redis.core.StringRedisTemplate;
+import org.springframework.dao.DuplicateKeyException;
 
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.Mockito.*;
@@ -29,10 +29,10 @@ class ReviewServiceTest {
     private OrderMapper orderMapper;
 
     @Mock
-    private StringRedisTemplate stringRedisTemplate;
+    private RestaurantMapper restaurantMapper;
 
     @Mock
-    private RestaurantMapper restaurantMapper;
+    private RestaurantCacheService restaurantCacheService;
 
     @InjectMocks
     private ReviewService reviewService;
@@ -61,9 +61,6 @@ class ReviewServiceTest {
                 userId,
                 OrderStatus.COMPLETED.getCode()
         )).thenReturn(order);
-
-        when(reviewMapper.countByOrderId(orderId))
-                .thenReturn(0);
 
         when(reviewMapper.insert(any(Review.class)))
                 .thenAnswer(invocation -> {
@@ -128,7 +125,8 @@ class ReviewServiceTest {
                         5
                 );
 
-        verify(stringRedisTemplate)
+        // 缓存失效走熔断封装的 RestaurantCacheService
+        verify(restaurantCacheService)
                 .delete(
                         "restaurant:detail:1"
                 );
@@ -194,8 +192,9 @@ class ReviewServiceTest {
                 OrderStatus.COMPLETED.getCode()
         )).thenReturn(order);
 
-        when(reviewMapper.countByOrderId(orderId))
-                .thenReturn(1);
+        // 唯一约束冲突由 DB 抛 DuplicateKeyException
+        when(reviewMapper.insert(any(Review.class)))
+                .thenThrow(new DuplicateKeyException("uk_order_id"));
 
         assertThrows(
                 BusinessException.class,
@@ -205,9 +204,10 @@ class ReviewServiceTest {
                 )
         );
 
+        // 重复评价时不应再更新评分统计
         verify(
-                reviewMapper,
+                restaurantMapper,
                 never()
-        ).insert(any());
+        ).addReviewStatistics(anyLong(), anyInt());
     }
 }

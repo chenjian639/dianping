@@ -13,7 +13,7 @@ import com.dianping.vo.MyReviewVO;
 import com.dianping.vo.RestaurantReviewSummaryVO;
 import com.dianping.vo.ReviewVO;
 import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.data.redis.core.StringRedisTemplate;
+import org.springframework.dao.DuplicateKeyException;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -29,10 +29,10 @@ public class ReviewService {
     private OrderMapper orderMapper;
 
     @Autowired
-    private StringRedisTemplate stringRedisTemplate;
+    private RestaurantMapper restaurantMapper;
 
     @Autowired
-    private RestaurantMapper restaurantMapper;
+    private RestaurantCacheService restaurantCacheService;
 
     @Transactional
     public Long createReview(
@@ -53,17 +53,9 @@ public class ReviewService {
             );
         }
 
-        // 2. 一个订单不能重复评价
-        int count =
-                reviewMapper.countByOrderId(
-                        dto.getOrderId()
-                );
-
-        if (count > 0) {
-            throw new BusinessException("该订单已经评价");
-        }
-
-        // 3. 创建评价
+        // 2. 创建评价
+        //    唯一性由 review.uk_order_id 保证，并发下重复评价会抛
+        //    DuplicateKeyException，这里转成业务异常，避免冒泡成 500
         Review review = new Review();
 
         review.setUserId(userId);
@@ -75,9 +67,13 @@ public class ReviewService {
         review.setRating(dto.getRating());
         review.setContent(dto.getContent());
 
-        // 4. 写数据库
-        reviewMapper.insert(review);
-        // 5. 同步维护餐厅评分统计
+        try {
+            reviewMapper.insert(review);
+        } catch (DuplicateKeyException e) {
+            throw new BusinessException("该订单已经评价");
+        }
+
+        // 3. 同步维护餐厅评分统计
         int rows =
                 restaurantMapper.addReviewStatistics(
                         order.getRestaurantId(),
@@ -89,10 +85,14 @@ public class ReviewService {
                     "更新餐厅评分统计失败"
             );
         }
-        // 6. 删除餐厅详情缓存
+        // 4. 删除餐厅详情缓存（走熔断保护，Redis 故障时降级跳过）
         String key = "restaurant:detail:" + order.getRestaurantId();
 
-        stringRedisTemplate.delete(key);
+        try {
+            restaurantCacheService.delete(key);
+        } catch (Exception e) {
+            // 缓存删除失败不影响评价结果
+        }
         return review.getId();
     }
 

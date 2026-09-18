@@ -30,7 +30,7 @@ public class UserService {
         User user = userMapper.selectById(id);
 
         if (user == null) {
-            throw new RuntimeException("用户不存在");
+            throw new BusinessException("用户不存在");
         }
         UserVO userVO = new UserVO();
         userVO.setId(user.getId());

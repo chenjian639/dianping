@@ -11,8 +11,8 @@ services:
       - "3307:3306"
     volumes:
       - mysql_data:/var/lib/mysql
-      - ./docker/mysql/01-init.sql:/docker-entrypoint-initdb.d/01-01-init.sql:ro
-      - ./docker/mysql/02-data.sql:/docker-entrypoint-initdb.d/02-02-data.sql:ro
+      - ./docker/mysql/01-init.sql:/docker-entrypoint-initdb.d/01-init.sql:ro
+      - ./docker/mysql/02-data.sql:/docker-entrypoint-initdb.d/02-data.sql:ro
     healthcheck:
       test:
         [
@@ -40,6 +40,25 @@ services:
       retries: 10
     restart: unless-stopped
 
+  rabbitmq:
+    image: rabbitmq:3.13-management
+    container_name: dodo-rabbitmq
+    environment:
+      RABBITMQ_DEFAULT_USER: ${RABBITMQ_USERNAME}
+      RABBITMQ_DEFAULT_PASS: ${RABBITMQ_PASSWORD}
+    ports:
+      - "5672:5672"
+      - "15672:15672"
+    volumes:
+      - rabbitmq_data:/var/lib/rabbitmq
+    healthcheck:
+      test: [ "CMD", "rabbitmqctl", "status" ]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 20s
+    restart: unless-stopped
+
   app:
     build: .
     container_name: dodo-app
@@ -49,6 +68,9 @@ services:
         condition: service_healthy
 
       redis:
+        condition: service_healthy
+
+      rabbitmq:
         condition: service_healthy
 
     ports:
@@ -63,6 +85,11 @@ services:
       SPRING_DATA_REDIS_HOST: ${SPRING_DATA_REDIS_HOST}
       SPRING_DATA_REDIS_PORT: ${SPRING_DATA_REDIS_PORT}
 
+      RABBITMQ_HOST: rabbitmq
+      RABBITMQ_PORT: 5672
+      RABBITMQ_USERNAME: ${RABBITMQ_USERNAME}
+      RABBITMQ_PASSWORD: ${RABBITMQ_PASSWORD}
+
       JWT_SECRET: ${JWT_SECRET}
 
     restart: unless-stopped
@@ -70,3 +97,4 @@ services:
 volumes:
   mysql_data:
   redis_data:
+  rabbitmq_data:

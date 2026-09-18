@@ -1,10 +1,7 @@
 package com.dianping.service;
 
-import com.dianping.entity.Restaurant;
 import com.dianping.exception.BusinessException;
-import com.dianping.mapper.RestaurantMapper;
 import com.dianping.vo.RestaurantDetailVO;
-import com.dianping.vo.RestaurantReviewSummaryVO;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -12,11 +9,10 @@ import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.Spy;
 import org.mockito.junit.jupiter.MockitoExtension;
-import org.springframework.data.redis.core.StringRedisTemplate;
-import org.springframework.data.redis.core.ValueOperations;
 
 import java.math.BigDecimal;
 import java.util.concurrent.TimeUnit;
+import java.util.function.Function;
 
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.*;
@@ -26,16 +22,13 @@ import static org.mockito.Mockito.*;
 class RestaurantServiceTest {
 
     @Mock
-    private RestaurantMapper restaurantMapper;
+    private RestaurantCacheService restaurantCacheService;
 
     @Mock
-    private ReviewService reviewService;
+    private RestaurantDatabaseService restaurantDatabaseService;
 
     @Mock
-    private StringRedisTemplate stringRedisTemplate;
-
-    @Mock
-    private ValueOperations<String, String> valueOperations;
+    private RestaurantLocalCacheService restaurantLocalCacheService;
 
     @Spy
     private ObjectMapper objectMapper =
@@ -43,6 +36,21 @@ class RestaurantServiceTest {
 
     @InjectMocks
     private RestaurantService restaurantService;
+
+    /**
+     * 让 L1 getOrLoad 直接执行 loader，从而走到 loadRestaurantDetail 内部的 L2/DB 逻辑。
+     */
+    @SuppressWarnings("unchecked")
+    private void stubLocalCacheToLoad(Long id) {
+        when(restaurantLocalCacheService.getOrLoad(
+                eq(id),
+                any(Function.class)
+        )).thenAnswer(inv -> {
+            Function<Long, RestaurantDetailVO> loader =
+                    inv.getArgument(1);
+            return loader.apply(id);
+        });
+    }
 
     @Test
     void getRestaurantDetail_shouldReturnCache_whenRedisHit()
@@ -68,10 +76,9 @@ class RestaurantServiceTest {
                         cachedVO
                 );
 
-        when(stringRedisTemplate.opsForValue())
-                .thenReturn(valueOperations);
+        stubLocalCacheToLoad(restaurantId);
 
-        when(valueOperations.get(
+        when(restaurantCacheService.get(
                 "restaurant:detail:1"
         )).thenReturn(json);
 
@@ -96,64 +103,50 @@ class RestaurantServiceTest {
                 result.getReviewCount()
         );
 
+        // L2 命中时不应回源 DB
         verify(
-                restaurantMapper,
+                restaurantDatabaseService,
                 never()
-        ).selectById(anyLong());
+        ).loadRestaurantDetail(anyLong());
 
+        // 命中后不应再回填缓存
         verify(
-                reviewService,
+                restaurantCacheService,
                 never()
-        ).getRestaurantReviewSummary(
-                anyLong()
+        ).set(
+                anyString(),
+                anyString(),
+                anyLong(),
+                any()
         );
     }
 
     @Test
-    void getRestaurantDetail_shouldQueryDatabaseAndCache_whenRedisMiss()
-            throws Exception {
+    void getRestaurantDetail_shouldQueryDatabaseAndCache_whenRedisMiss() {
 
         Long restaurantId = 1L;
 
-        when(stringRedisTemplate.opsForValue())
-                .thenReturn(valueOperations);
+        stubLocalCacheToLoad(restaurantId);
 
-        when(valueOperations.get(
+        when(restaurantCacheService.get(
                 "restaurant:detail:1"
         )).thenReturn(null);
 
-        Restaurant restaurant =
-                new Restaurant();
+        RestaurantDetailVO vo =
+                new RestaurantDetailVO();
 
-        restaurant.setId(1L);
-        restaurant.setName("老王烧烤");
-        restaurant.setDescription(
-                "主打烧烤和夜宵"
-        );
-        restaurant.setAddress(
-                "海淀区中关村大街1号"
-        );
-        restaurant.setStatus(1);
+        vo.setId(1L);
+        vo.setName("老王烧烤");
+        vo.setDescription("主打烧烤和夜宵");
+        vo.setAddress("海淀区中关村大街1号");
+        vo.setStatus(1);
+        vo.setAverageRating(new BigDecimal("5.0"));
+        vo.setReviewCount(1L);
 
         when(
-                restaurantMapper
-                        .selectById(restaurantId)
-        ).thenReturn(restaurant);
-
-        RestaurantReviewSummaryVO summary =
-                new RestaurantReviewSummaryVO();
-
-        summary.setAverageRating(
-                new BigDecimal("5.0")
-        );
-        summary.setReviewCount(1L);
-
-        when(
-                reviewService
-                        .getRestaurantReviewSummary(
-                                restaurantId
-                        )
-        ).thenReturn(summary);
+                restaurantDatabaseService
+                        .loadRestaurantDetail(restaurantId)
+        ).thenReturn(vo);
 
         RestaurantDetailVO result =
                 restaurantService
@@ -177,23 +170,16 @@ class RestaurantServiceTest {
         );
 
         verify(
-                restaurantMapper,
+                restaurantDatabaseService,
                 times(1)
-        ).selectById(restaurantId);
+        ).loadRestaurantDetail(restaurantId);
 
-        verify(
-                reviewService,
-                times(1)
-        ).getRestaurantReviewSummary(
-                restaurantId
-        );
-
-        verify(valueOperations).set(
+        // 未命中后应回填 L2，TTL 在 30~40 分钟
+        verify(restaurantCacheService).set(
                 eq("restaurant:detail:1"),
                 anyString(),
                 longThat(ttl ->
-                        ttl >= 30
-                                && ttl <= 40
+                        ttl >= 30 && ttl <= 40
                 ),
                 eq(TimeUnit.MINUTES)
         );
@@ -204,17 +190,16 @@ class RestaurantServiceTest {
 
         Long restaurantId = 99999999L;
 
-        when(stringRedisTemplate.opsForValue())
-                .thenReturn(valueOperations);
+        stubLocalCacheToLoad(restaurantId);
 
-        when(valueOperations.get(
+        when(restaurantCacheService.get(
                 "restaurant:detail:99999999"
         )).thenReturn(null);
 
         when(
-                restaurantMapper
-                        .selectById(restaurantId)
-        ).thenReturn(null);
+                restaurantDatabaseService
+                        .loadRestaurantDetail(restaurantId)
+        ).thenThrow(new BusinessException("餐厅不存在"));
 
         assertThrows(
                 BusinessException.class,
@@ -224,7 +209,8 @@ class RestaurantServiceTest {
                         )
         );
 
-        verify(valueOperations).set(
+        // DB 中不存在时应写入空值缓存，防穿透
+        verify(restaurantCacheService).set(
                 "restaurant:detail:99999999",
                 "__NULL__",
                 5,
@@ -232,11 +218,9 @@ class RestaurantServiceTest {
         );
 
         verify(
-                reviewService,
-                never()
-        ).getRestaurantReviewSummary(
-                anyLong()
-        );
+                restaurantDatabaseService,
+                times(1)
+        ).loadRestaurantDetail(restaurantId);
     }
 
     @Test
@@ -244,10 +228,9 @@ class RestaurantServiceTest {
 
         Long restaurantId = 99999999L;
 
-        when(stringRedisTemplate.opsForValue())
-                .thenReturn(valueOperations);
+        stubLocalCacheToLoad(restaurantId);
 
-        when(valueOperations.get(
+        when(restaurantCacheService.get(
                 "restaurant:detail:99999999"
         )).thenReturn("__NULL__");
 
@@ -259,16 +242,10 @@ class RestaurantServiceTest {
                         )
         );
 
+        // 空值缓存命中时不应回源 DB
         verify(
-                restaurantMapper,
+                restaurantDatabaseService,
                 never()
-        ).selectById(anyLong());
-
-        verify(
-                reviewService,
-                never()
-        ).getRestaurantReviewSummary(
-                anyLong()
-        );
+        ).loadRestaurantDetail(anyLong());
     }
 }

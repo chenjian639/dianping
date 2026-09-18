@@ -17,7 +17,6 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.context.ApplicationEventPublisher;
-import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import java.util.List;
@@ -36,8 +35,6 @@ public class RestaurantService {
     @Autowired
     private ReviewService reviewService;
     @Autowired
-    private StringRedisTemplate stringRedisTemplate;
-    @Autowired
     private ObjectMapper objectMapper;
     @Autowired
     private  OutboxEventMapper outboxEventMapper;
@@ -49,7 +46,6 @@ public class RestaurantService {
     private ApplicationEventPublisher applicationEventPublisher;
     @Autowired
     private RestaurantDatabaseService restaurantDatabaseService;
-// 下面直接用了 applicationEventPublisher，但没有声明这个字段
 
     static final String RESTAURANT_DETAIL_KEY_PREFIX =
             "restaurant:detail:";

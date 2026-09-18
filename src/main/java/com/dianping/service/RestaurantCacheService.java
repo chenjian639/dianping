@@ -39,4 +39,9 @@ public class RestaurantCacheService {
                         unit
                 );
     }
+
+    @CircuitBreaker(name = "redisCache")
+    public void delete(String key) {
+        stringRedisTemplate.delete(key);
+    }
 }
