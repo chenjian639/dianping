@@ -1,4 +1,4 @@
-name: Campus Pickup CI and manual CD
+name: Campus Pickup CI and CD
 
 on:
   push:
@@ -8,11 +8,11 @@ on:
   workflow_dispatch:
     inputs:
       deploy:
-        description: Deploy after tests (requires production secrets and a database backup)
+        description: Deploy after tests
         type: boolean
         default: false
       database_backup_confirmed:
-        description: A restorable database backup was taken before this deployment
+        description: A restorable database backup is available
         type: boolean
         default: false
 
@@ -21,23 +21,37 @@ permissions:
 
 jobs:
   verify:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
+
       - uses: actions/setup-java@v4
         with:
           distribution: temurin
           java-version: '21'
           cache: maven
+
       - name: Unit and real MySQL concurrency tests
         run: mvn -B clean verify
+
+      - name: Validate single-server deployment configuration
+        env:
+          MYSQL_ROOT_PASSWORD: ci-validation-root
+          MYSQL_PASSWORD: ci-validation-database
+          RABBITMQ_PASSWORD: ci-validation-rabbit
+          JWT_SECRET: ci-validation-secret-at-least-32-characters
+        run: docker compose -f compose.server.yml config --quiet
+
       - name: Build Docker runtime and launch two application instances
         run: docker compose -f compose.campus.yml up -d --build
+
       - name: Two-instance API and cache broadcast smoke test
         run: python3 scripts/smoke_campus.py
+
       - name: Container logs
         if: failure()
         run: docker compose -f compose.campus.yml logs --no-color --tail 150
+
       - name: Upload reports
         if: always()
         uses: actions/upload-artifact@v4
@@ -46,10 +60,14 @@ jobs:
           path: |
             target/surefire-reports
             target/failsafe-reports
-      - uses: actions/upload-artifact@v4
+
+      - name: Upload application JAR
+        uses: actions/upload-artifact@v4
         with:
           name: campus-jar
           path: target/dianping-0.0.1-SNAPSHOT.jar
+          if-no-files-found: error
+
       - name: Stop isolated test containers
         if: always()
         run: docker compose -f compose.campus.yml down -v
@@ -70,7 +88,8 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - uses: actions/download-artifact@v4
+      - name: Download application JAR
+        uses: actions/download-artifact@v4
         with:
           name: campus-jar
           path: target
@@ -111,6 +130,7 @@ jobs:
           scp -i ~/.ssh/deploy_key \
             -o BatchMode=yes \
             -o StrictHostKeyChecking=yes \
+            -o ConnectTimeout=20 \
             "$RUNNER_TEMP/release.tgz" \
             "$SERVER_USER@$SERVER_HOST:/home/ubuntu/campus-deploy/incoming/$RELEASE_ID.tgz"
 
@@ -175,14 +195,19 @@ jobs:
             'ENTRYPOINT ["java", "-jar", "app.jar"]' \
             > "$STAGE/Dockerfile.runtime"
 
-          # 使用独立标签构建，成功后才替换正式镜像标签。
+          # 独立忽略规则允许复制 CI 生成的 JAR。
+          printf '%s\n' '.git' '.env' '.env.*' \
+            > "$STAGE/Dockerfile.runtime.dockerignore"
+
+          # 构建成功后才替换正式镜像标签。
           sudo -n docker build \
             -f "$STAGE/Dockerfile.runtime" \
             -t "campus-pickup:release-$RELEASE_ID" "$STAGE"
 
-          rm "$STAGE/Dockerfile.runtime"
+          rm "$STAGE/Dockerfile.runtime" \
+            "$STAGE/Dockerfile.runtime.dockerignore"
 
-          # 同步代码，保留服务器的环境配置和 Git 信息。
+          # 同步代码，保留服务器环境配置和 Git 信息。
           rsync -a --delete \
             --exclude='.env' \
             --exclude='.env.*' \
@@ -216,6 +241,6 @@ jobs:
           exit 1
           REMOTE
 
-        - name: Remove SSH key
-          if: always()
-          run: rm -f ~/.ssh/deploy_key
+      - name: Remove SSH key
+        if: always()
+        run: rm -f ~/.ssh/deploy_key
