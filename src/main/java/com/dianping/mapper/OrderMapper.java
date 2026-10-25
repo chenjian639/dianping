@@ -6,6 +6,13 @@ import org.apache.ibatis.annotations.*;
 import java.util.List;
 @Mapper
 public interface OrderMapper {
+    @Select("SELECT id FROM user WHERE id = #{userId} FOR UPDATE")
+    Long lockUser(Long userId);
+    @Select("SELECT * FROM orders WHERE id = #{id}")
+    Order selectById(Long id);
+    @Update("UPDATE orders SET status = 4 WHERE id = #{id} AND restaurant_id = #{restaurantId} AND status = 3 AND pickup_code = #{code}")
+    int verifyPickup(Long id, Long restaurantId, String code);
+
 
     @Insert("""
     INSERT INTO orders(
@@ -13,14 +20,15 @@ public interface OrderMapper {
         restaurant_id,
         total_amount,
         status,
-        request_id
+        request_id, pickup_slot_id, pickup_code, expires_at
     )
     VALUES(
         #{userId},
         #{restaurantId},
         #{totalAmount},
         #{status},
-        #{requestId}
+        #{requestId}, #{pickupSlotId}, #{pickupCode},
+        LEAST(DATE_ADD(NOW(), INTERVAL 30 MINUTE), (SELECT starts_at FROM pickup_slot WHERE id = #{pickupSlotId}))
     )
     """)
     @Options(useGeneratedKeys = true, keyProperty = "id")
@@ -73,6 +81,7 @@ public interface OrderMapper {
     WHERE id = #{orderId}
       AND user_id = #{userId}
       AND status = #{currentStatus}
+      AND expires_at > NOW()
     """)
     int payOrder(
             Long orderId,
@@ -150,6 +159,7 @@ public interface OrderMapper {
     SET status = #{newStatus}
     WHERE id = #{orderId}
       AND status = #{currentStatus}
+      AND expires_at <= NOW()
     """)
     int timeoutCancelOrder(
             @Param("orderId") Long orderId,
@@ -161,10 +171,7 @@ public interface OrderMapper {
     SELECT id
     FROM orders
     WHERE status = #{status}
-      AND created_at < DATE_SUB(
-            NOW(),
-            INTERVAL 30 MINUTE
-      )
+      AND expires_at <= NOW()
     ORDER BY id
     LIMIT #{limit}
     """)

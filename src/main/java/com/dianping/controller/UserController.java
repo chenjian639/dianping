@@ -19,7 +19,8 @@ public class UserController {
     private UserService userService;
 
     @GetMapping("/{id}")
-    public Result<UserVO> getUserById(@PathVariable Long id) {
+    public Result<UserVO> getUserById(@PathVariable Long id, @RequestAttribute("userId") Long userId) {
+        if (!id.equals(userId)) throw new com.dianping.exception.BusinessException("无权查看其他用户信息");
         return Result.success(userService.findUserById(id));
     }
 

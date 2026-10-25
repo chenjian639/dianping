@@ -1,0 +1,7 @@
+.git
+.idea
+.vscode
+.env
+.sandbox-tmp
+target
+docs

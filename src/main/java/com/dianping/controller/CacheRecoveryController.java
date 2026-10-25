@@ -6,6 +6,7 @@ import com.dianping.service.OutboxPublisherService;
 import org.springframework.web.bind.annotation.*;
 
 @RestController
+@com.dianping.interceptor.AdminOnly
 @RequestMapping("/admin/cache-recovery")
 public class CacheRecoveryController {
 

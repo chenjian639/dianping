@@ -1,5 +1,4 @@
--- Dodo Food 建表脚本（与代码保持一致）
--- 全新库可直接执行；若已有旧库，请参考末尾的增量迁移语句
+-- 旧版 Dodo Food 结构参考；校园完整结构以 db/migration/V1 + V2 为准。
 
 CREATE DATABASE IF NOT EXISTS dodo_food
     DEFAULT CHARACTER SET utf8mb4
@@ -205,15 +204,3 @@ CREATE TABLE outbox_event (
                               INDEX idx_outbox_status_id (status, id),
                               INDEX idx_outbox_processing_at (processing_at)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='Outbox事件表';
-
-
--- =========================
--- 增量迁移（已有旧库时执行）
--- =========================
--- ALTER TABLE restaurant
---     ADD COLUMN average_rating DECIMAL(2,1) NOT NULL DEFAULT 0.0 COMMENT '平均评分',
---     ADD COLUMN review_count INT NOT NULL DEFAULT 0 COMMENT '评价数量';
---
--- ALTER TABLE orders
---     ADD COLUMN request_id VARCHAR(64) NOT NULL COMMENT '客户端幂等键',
---     ADD UNIQUE KEY uk_user_request (user_id, request_id);

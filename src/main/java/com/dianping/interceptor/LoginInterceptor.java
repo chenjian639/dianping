@@ -51,6 +51,16 @@ public class LoginInterceptor implements HandlerInterceptor {
             Long restaurantId = restaurantIdNumber == null ? null : restaurantIdNumber.longValue();
 
             request.setAttribute("restaurantId", restaurantId);
+            boolean adminEndpoint = request.getRequestURI().startsWith("/admin/")
+                    || handler instanceof org.springframework.web.method.HandlerMethod method
+                    && (method.hasMethodAnnotation(AdminOnly.class)
+                    || method.getBeanType().isAnnotationPresent(AdminOnly.class));
+            if (adminEndpoint && !"ADMIN".equals(role)) {
+                response.setStatus(403);
+                response.setContentType("application/json;charset=UTF-8");
+                response.getWriter().write("{\"code\":403,\"msg\":\"仅管理员可以访问\",\"data\":null}");
+                return false;
+            }
             log.debug("当前用户ID：{}", userId);
 
             return true;

@@ -11,6 +11,9 @@ import java.util.List;
 public class OrderDetailVO {
 
     private Long id;
+    private Long pickupSlotId;
+    private String pickupCode;
+    private LocalDateTime expiresAt;
 
     private Long restaurantId;
 

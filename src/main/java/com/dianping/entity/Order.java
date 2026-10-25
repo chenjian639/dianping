@@ -9,6 +9,11 @@ import java.time.LocalDateTime;
 public class Order {
 
     private Long id;
+    private Long pickupSlotId;
+    @com.fasterxml.jackson.annotation.JsonIgnore
+    @lombok.ToString.Exclude
+    private String pickupCode;
+    private LocalDateTime expiresAt;
 
     private Long userId;
 

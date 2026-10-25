@@ -48,6 +48,6 @@ public class GlobalExceptionHandler {
                 e
         );
 
-        return Result.error(500, e.getMessage());
+        return Result.error(500, "系统异常，请稍后重试");
     }
 }

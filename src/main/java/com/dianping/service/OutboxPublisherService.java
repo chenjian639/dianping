@@ -34,8 +34,7 @@ public class OutboxPublisherService {
 
     public void publishPending() {
 
-        List<OutboxEvent> events =
-                outboxEventMapper.selectPending(20);
+        List<OutboxEvent> events = outboxEventMapper.selectPending(20);
 
         for (OutboxEvent event : events) {
 

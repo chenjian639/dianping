@@ -11,7 +11,7 @@ services:
       - "3307:3306"
     volumes:
       - mysql_data:/var/lib/mysql
-      - ./docker/mysql/01-init.sql:/docker-entrypoint-initdb.d/01-init.sql:ro
+      - ./src/main/resources/db/migration/V1__initial_schema.sql:/docker-entrypoint-initdb.d/01-init.sql:ro
       - ./docker/mysql/02-data.sql:/docker-entrypoint-initdb.d/02-data.sql:ro
     healthcheck:
       test:
@@ -82,8 +82,10 @@ services:
       SPRING_DATASOURCE_USERNAME: ${SPRING_DATASOURCE_USERNAME}
       SPRING_DATASOURCE_PASSWORD: ${SPRING_DATASOURCE_PASSWORD}
 
-      SPRING_DATA_REDIS_HOST: ${SPRING_DATA_REDIS_HOST}
-      SPRING_DATA_REDIS_PORT: ${SPRING_DATA_REDIS_PORT}
+      SPRING_DATA_REDIS_HOST: redis
+      SPRING_DATA_REDIS_PORT: 6379
+      TZ: Asia/Shanghai
+      JAVA_TOOL_OPTIONS: -Duser.timezone=Asia/Shanghai
 
       RABBITMQ_HOST: rabbitmq
       RABBITMQ_PORT: 5672

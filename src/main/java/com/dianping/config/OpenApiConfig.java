@@ -19,9 +19,9 @@ public class OpenApiConfig {
         return new OpenAPI()
                 .info(
                         new Info()
-                                .title("Dodo Food API")
-                                .description("食客点评商家系统后端接口文档")
-                                .version("1.0.0")
+                                .title("校园预约取餐 API")
+                                .description("档口分时预约、库存与产能管理、模拟支付、凭码核销")
+                                .version("2.0.0")
                 )
                 .addSecurityItem(
                         new SecurityRequirement()

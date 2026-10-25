@@ -6,6 +6,13 @@ import org.springframework.context.annotation.Configuration;
 
 @Configuration
 public class RabbitMQConfig {
+    public static final String LOCAL_CACHE_EXCHANGE = "restaurant.local-cache.evict";
+    @Bean public FanoutExchange localCacheExchange() { return new FanoutExchange(LOCAL_CACHE_EXCHANGE); }
+    @Bean public AnonymousQueue localCacheQueue() { return new AnonymousQueue(); }
+    @Bean public Binding localCacheBinding(AnonymousQueue localCacheQueue, FanoutExchange localCacheExchange) {
+        return BindingBuilder.bind(localCacheQueue).to(localCacheExchange);
+    }
+
 
     public static final String RESTAURANT_CACHE_EVICT_QUEUE =
             "restaurant.cache.evict";

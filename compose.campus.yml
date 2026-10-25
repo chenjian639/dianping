@@ -1,0 +1,70 @@
+name: campus-pickup
+
+x-app: &app
+  image: campus-pickup:local
+  pull_policy: never
+  environment: &app-env
+    TZ: Asia/Shanghai
+    JAVA_TOOL_OPTIONS: -Duser.timezone=Asia/Shanghai -Xms128m -Xmx512m
+    SPRING_DATASOURCE_URL: jdbc:mysql://mysql:3306/dodo_food?useUnicode=true&characterEncoding=utf8&serverTimezone=Asia/Shanghai&allowPublicKeyRetrieval=true&useSSL=false
+    SPRING_DATASOURCE_USERNAME: root
+    SPRING_DATASOURCE_PASSWORD: ${MYSQL_ROOT_PASSWORD:-campus-local-db-only}
+    SPRING_DATASOURCE_HIKARI_MAXIMUM_POOL_SIZE: 10
+    SPRING_DATA_REDIS_HOST: redis
+    SPRING_DATA_REDIS_PORT: 6379
+    RABBITMQ_HOST: rabbitmq
+    RABBITMQ_USERNAME: ${RABBITMQ_USERNAME:-campus}
+    RABBITMQ_PASSWORD: ${RABBITMQ_PASSWORD:-campus-local-mq-only}
+    JWT_SECRET: ${JWT_SECRET:-campus-local-only-secret-at-least-32-characters}
+  depends_on:
+    mysql: {condition: service_healthy}
+    redis: {condition: service_healthy}
+    rabbitmq: {condition: service_healthy}
+  restart: unless-stopped
+
+services:
+  mysql:
+    image: mysql:8.0
+    environment:
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:-campus-local-db-only}
+      MYSQL_DATABASE: dodo_food
+      TZ: Asia/Shanghai
+    volumes:
+      - campus_mysql:/var/lib/mysql
+    healthcheck:
+      test: [CMD-SHELL, 'mysqladmin ping -h localhost -uroot -p"$$MYSQL_ROOT_PASSWORD"']
+      interval: 5s
+      timeout: 5s
+      retries: 30
+  redis:
+    image: redis:7
+    healthcheck:
+      test: [CMD, redis-cli, ping]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+  rabbitmq:
+    image: rabbitmq:3.13-management
+    environment:
+      RABBITMQ_DEFAULT_USER: ${RABBITMQ_USERNAME:-campus}
+      RABBITMQ_DEFAULT_PASS: ${RABBITMQ_PASSWORD:-campus-local-mq-only}
+    healthcheck:
+      test: [CMD, rabbitmq-diagnostics, -q, ping]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+  app1:
+    <<: *app
+    build: .
+    ports: ['127.0.0.1:18081:8080']
+  app2:
+    <<: *app
+    ports: ['127.0.0.1:18082:8080']
+  gateway:
+    image: nginx:1.27-alpine
+    ports: ['127.0.0.1:18080:80']
+    volumes:
+      - ./docker/nginx/campus.conf:/etc/nginx/conf.d/default.conf:ro
+    depends_on: [app1, app2]
+volumes:
+  campus_mysql:

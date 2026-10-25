@@ -65,8 +65,8 @@ public class MerchantOrderController {
         return Result.success(null);
     }
 
-    @PutMapping("/{id}/deliver")
-    public Result<Void> startDelivery(
+    @PutMapping("/{id}/ready")
+    public Result<Void> markReady(
             @PathVariable Long id,
             @RequestAttribute("role") String role,
             @RequestAttribute(value = "restaurantId", required = false)
@@ -74,21 +74,22 @@ public class MerchantOrderController {
 
         checkMerchant(role, restaurantId);
 
-        orderService.startDelivery(id, restaurantId);
+        orderService.markReady(id, restaurantId);
 
         return Result.success(null);
     }
 
-    @PutMapping("/{id}/complete")
+    @PutMapping("/{id}/pickup")
     public Result<Void> completeOrder(
             @PathVariable Long id,
+            @jakarta.validation.Valid @RequestBody com.dianping.dto.PickupVerificationDTO dto,
             @RequestAttribute("role") String role,
             @RequestAttribute(value = "restaurantId", required = false)
             Long restaurantId) {
 
         checkMerchant(role, restaurantId);
 
-        orderService.completeOrder(id, restaurantId);
+        orderService.completeOrder(id, restaurantId, dto.getPickupCode());
 
         return Result.success(null);
     }

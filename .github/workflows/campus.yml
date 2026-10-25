@@ -1,0 +1,103 @@
+name: Campus Pickup CI and manual CD
+
+on:
+  push:
+    branches: [master, main]
+  pull_request:
+    branches: [master, main]
+  workflow_dispatch:
+    inputs:
+      deploy:
+        description: Deploy after tests (requires production secrets and a database backup)
+        type: boolean
+        default: false
+      database_backup_confirmed:
+        description: A restorable database backup was taken before this deployment
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+          cache: maven
+      - name: Unit and real MySQL concurrency tests
+        run: mvn -B clean verify
+      - name: Build Docker runtime and launch two application instances
+        run: docker compose -f compose.campus.yml up -d --build
+      - name: Two-instance API and cache broadcast smoke test
+        run: python3 scripts/smoke_campus.py
+      - name: Container logs
+        if: failure()
+        run: docker compose -f compose.campus.yml logs --no-color --tail 150
+      - name: Upload reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-reports
+          path: |
+            target/surefire-reports
+            target/failsafe-reports
+      - uses: actions/upload-artifact@v4
+        with:
+          name: campus-jar
+          path: target/dianping-0.0.1-SNAPSHOT.jar
+      - name: Stop isolated test containers
+        if: always()
+        run: docker compose -f compose.campus.yml down -v
+
+  deploy:
+    if: github.event_name == 'workflow_dispatch' && inputs.deploy && inputs.database_backup_confirmed && github.ref == 'refs/heads/master'
+    needs: verify
+    runs-on: ubuntu-latest
+    environment: production
+    concurrency:
+      group: campus-production
+      cancel-in-progress: false
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: campus-jar
+      - name: Configure verified SSH host
+        env:
+          SSH_PRIVATE_KEY: ${{ secrets.ECS_SSH_KEY }}
+          SSH_KNOWN_HOSTS: ${{ secrets.ECS_KNOWN_HOSTS }}
+        run: |
+          install -m 700 -d ~/.ssh
+          printf '%s\n' "$SSH_PRIVATE_KEY" > ~/.ssh/campus_deploy
+          chmod 600 ~/.ssh/campus_deploy
+          printf '%s\n' "$SSH_KNOWN_HOSTS" > ~/.ssh/known_hosts
+      - name: Upload and restart with readiness rollback
+        env:
+          ECS_HOST: ${{ secrets.ECS_HOST }}
+          ECS_USER: ${{ secrets.ECS_USER }}
+        run: |
+          scp -i ~/.ssh/campus_deploy dianping-0.0.1-SNAPSHOT.jar "$ECS_USER@$ECS_HOST:/home/dodo/projects/dianping/target/dianping-new.jar"
+          ssh -i ~/.ssh/campus_deploy "$ECS_USER@$ECS_HOST" 'bash -s' <<'REMOTE'
+          set -euo pipefail
+          cd /home/dodo/projects/dianping/target
+          test -f dianping-0.0.1-SNAPSHOT.jar
+          cp dianping-0.0.1-SNAPSHOT.jar dianping-backup.jar
+          mv dianping-new.jar dianping-0.0.1-SNAPSHOT.jar
+          healthy() {
+            for attempt in {1..24}; do
+              if curl --fail --silent http://127.0.0.1:8080/actuator/health/readiness | grep -q '"status":"UP"'; then return 0; fi
+              sleep 5
+            done
+            return 1
+          }
+          if sudo -n /usr/bin/systemctl restart dianping && healthy; then exit 0; fi
+          cp dianping-backup.jar dianping-0.0.1-SNAPSHOT.jar
+          sudo -n /usr/bin/systemctl restart dianping
+          healthy || echo 'Rollback health check failed; inspect the service and database backup.'
+          echo 'Deployment failed; application rollback attempted. Database migrations are not rolled back.'
+          exit 1
+          REMOTE

@@ -23,7 +23,7 @@ public class OrderController {
 
     @PostMapping("/create")
     public Result<Long> createOrder(
-            @RequestBody CreateOrderDTO dto,
+            @jakarta.validation.Valid @RequestBody CreateOrderDTO dto,
             HttpServletRequest request) {
 
         Long userId =
@@ -32,7 +32,7 @@ public class OrderController {
         Long orderId =
                 orderService.createOrder(
                         userId,
-                        dto.getRequestId()
+                        dto.getRequestId(), dto.getPickupSlotId()
                 );
 
         return Result.success(orderId);
@@ -44,6 +44,7 @@ public class OrderController {
             @RequestParam(defaultValue = "1") Integer page,
             @RequestParam(defaultValue = "10") Integer pageSize) {
 
+        if (page < 1 || pageSize < 1 || pageSize > 100) throw new com.dianping.exception.BusinessException("分页参数不合法");
         return Result.success(
                 orderService.getOrders(userId, page, pageSize)
         );

@@ -17,15 +17,21 @@
     <groupId>com.dianping</groupId> <!-- 替换为你的组织名 -->
     <artifactId>dianping</artifactId> <!-- 替换为你的项目名 -->
     <version>0.0.1-SNAPSHOT</version>
-    <name>dianping</name>
-    <description>大众点评项目 - 食客点评商家系统</description>
+    <name>campus-pickup</name>
+    <description>校园预约取餐与档口产能管理</description>
 
     <properties>
+        <testcontainers.version>1.21.4</testcontainers.version>
         <java.version>21</java.version> <!-- 设置你使用的 Java 版本 -->
     </properties>
 
     <!-- 3. 添加 Spring Boot 起步依赖 -->
     <dependencies>
+        <dependency><groupId>org.flywaydb</groupId><artifactId>flyway-core</artifactId></dependency>
+        <dependency><groupId>org.flywaydb</groupId><artifactId>flyway-mysql</artifactId></dependency>
+        <dependency><groupId>org.springframework.boot</groupId><artifactId>spring-boot-starter-aop</artifactId></dependency>
+        <dependency><groupId>org.testcontainers</groupId><artifactId>junit-jupiter</artifactId><scope>test</scope></dependency>
+        <dependency><groupId>org.testcontainers</groupId><artifactId>mysql</artifactId><scope>test</scope></dependency>
         <dependency>
             <groupId>org.springframework.boot</groupId>
             <artifactId>spring-boot-starter-web</artifactId>
@@ -99,6 +105,10 @@
 
     <build>
         <plugins>
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId><artifactId>maven-failsafe-plugin</artifactId>
+                <executions><execution><goals><goal>integration-test</goal><goal>verify</goal></goals></execution></executions>
+            </plugin>
             <plugin>
                 <groupId>org.springframework.boot</groupId>
                 <artifactId>spring-boot-maven-plugin</artifactId>

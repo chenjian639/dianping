@@ -30,6 +30,9 @@ public class OrderService {
     private OrderMapper orderMapper;
 
     @Autowired
+    private PickupSlotMapper pickupSlotMapper;
+
+    @Autowired
     private OrderItemMapper orderItemMapper;
 
     @Autowired
@@ -63,14 +66,16 @@ public class OrderService {
     @Transactional
     public Long createOrder(
             Long userId,
-            String requestId) {
+            String requestId, Long pickupSlotId) {
 
-        if (requestId == null || requestId.isBlank()) {
+        if (requestId == null || requestId.isBlank() || requestId.length() > 64 || pickupSlotId == null) {
             throw new BusinessException(
-                    "requestId不能为空"
+                    "requestId须为1到64字符且必须指定取餐时段"
             );
         }
 
+        // 同一用户的下单串行化，避免不同请求重复购买同一份购物车。
+        if (orderMapper.lockUser(userId) == null) throw new BusinessException("用户不存在");
         // 1. 已经成功创建过，直接返回
         Order existing =
                 orderMapper.selectByUserIdAndRequestId(
@@ -79,6 +84,7 @@ public class OrderService {
                 );
 
         if (existing != null) {
+            if (!Objects.equals(existing.getPickupSlotId(), pickupSlotId)) throw new BusinessException("幂等键已用于其他时段");
             return existing.getId();
         }
 
@@ -107,6 +113,8 @@ public class OrderService {
 
         // 4. 校验并生成下单快照
         for (CartItemVO cartItem : cartItems) {
+            if (cartItem.getQuantity() == null || cartItem.getQuantity() < 1)
+                throw new BusinessException("购物车数量不合法");
 
             Dish dish =
                     dishMapper.selectById(
@@ -149,6 +157,12 @@ public class OrderService {
                     );
         }
 
+        // 先占时段，再按菜品 ID 升序扣库存；任何失败全部回滚。
+        PickupSlot slot = pickupSlotMapper.selectById(pickupSlotId);
+        if (slot == null || !slot.getRestaurantId().equals(restaurantId)
+                || pickupSlotMapper.reserve(pickupSlotId, restaurantId) == 0) {
+            throw new BusinessException("时段不属于该档口、已满或已截止预约");
+        }
         // 5. 先写订单，抢占幂等键
         Order order = new Order();
 
@@ -159,6 +173,8 @@ public class OrderService {
                 OrderStatus.PENDING_PAYMENT.getCode()
         );
         order.setRequestId(requestId);
+        order.setPickupSlotId(pickupSlotId);
+        order.setPickupCode(UUID.randomUUID().toString().replace("-", ""));
 
         try {
 
@@ -252,6 +268,9 @@ public class OrderService {
         OrderDetailVO vo = new OrderDetailVO();
 
         vo.setId(order.getId());
+        vo.setPickupSlotId(order.getPickupSlotId());
+        vo.setPickupCode(order.getPickupCode());
+        vo.setExpiresAt(order.getExpiresAt());
         vo.setRestaurantId(order.getRestaurantId());
         vo.setTotalAmount(order.getTotalAmount());
         vo.setStatus(order.getStatus());
@@ -295,16 +314,17 @@ public class OrderService {
             throw new BusinessException("订单不存在或当前状态无法取消");
         }
 
+        releaseSlot(orderId);
+
         // 2. 查询这个订单买了哪些菜
         List<OrderItem> items =
                 orderItemMapper.selectByOrderId(orderId);
 
         // 3. 把每个菜的库存加回来
+        items.sort(Comparator.comparing(OrderItem::getDishId));
         for (OrderItem item : items) {
-            dishMapper.increaseStock(
-                    item.getDishId(),
-                    item.getQuantity()
-            );
+            if (dishMapper.increaseStock(item.getDishId(), item.getQuantity()) == 0)
+                throw new BusinessException("恢复库存失败");
         }
         log.info(
                 "订单取消成功, orderId={}, userId={}",
@@ -327,36 +347,30 @@ public class OrderService {
         }
     }
 
-    public void startDelivery(Long orderId,Long restaurantId) {
+    public void markReady(Long orderId,Long restaurantId) {
 
         int rows = orderMapper.updateStatusByRestaurant(
                 orderId,
                 restaurantId,
                 OrderStatus.PREPARING.getCode(),
-                OrderStatus.DELIVERING.getCode()
+                OrderStatus.READY_FOR_PICKUP.getCode()
         );
 
         if (rows == 0) {
-            throw new BusinessException("订单不存在或当前状态无法配送");
+            throw new BusinessException("订单不存在或当前状态无法标记待取餐");
         }
     }
 
-    public void completeOrder(Long orderId, Long restaurantId) {
+    public void completeOrder(Long orderId, Long restaurantId, String pickupCode) {
+        if (orderMapper.verifyPickup(orderId, restaurantId, pickupCode) == 0)
+            throw new BusinessException("取餐码错误、订单不属于该档口或订单非待取餐状态");
+    }
 
-        int rows = orderMapper.updateStatusByRestaurant(
-                orderId,
-                restaurantId,
-                OrderStatus.DELIVERING.getCode(),
-                OrderStatus.COMPLETED.getCode()
-        );
-
-        if (rows == 0) {
-            log.warn(
-                    "订单支付失败, orderId={}, 原因=订单不存在或状态不允许",
-                    orderId
-            );
-            throw new BusinessException("订单不存在或当前状态无法完成");
-        }
+    private void releaseSlot(Long orderId) {
+        Order order = orderMapper.selectById(orderId);
+        // 旧订单没有预约时段，仍允许取消。
+        if (order.getPickupSlotId() != null && pickupSlotMapper.release(order.getPickupSlotId()) != 1)
+            throw new BusinessException("时段名额释放失败");
     }
 
     public PageResult<Order> getMerchantOrders(
@@ -410,6 +424,8 @@ public class OrderService {
         OrderDetailVO vo = new OrderDetailVO();
 
         vo.setId(order.getId());
+        vo.setPickupSlotId(order.getPickupSlotId());
+        vo.setExpiresAt(order.getExpiresAt());
         vo.setRestaurantId(order.getRestaurantId());
         vo.setTotalAmount(order.getTotalAmount());
         vo.setStatus(order.getStatus());
@@ -441,11 +457,13 @@ public class OrderService {
             return;
         }
 
+        releaseSlot(orderId);
         // 只有真正从待支付 -> 已取消的那个线程
         // 才允许恢复库存
         List<OrderItem> items =
                 orderItemMapper.selectByOrderId(orderId);
 
+        items.sort(Comparator.comparing(OrderItem::getDishId));
         for (OrderItem item : items) {
 
             int affected =

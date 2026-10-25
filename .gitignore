@@ -18,3 +18,7 @@ logs/
 # OS files
 .DS_Store
 Thumbs.db
+
+# Local verification output
+.sandbox-tmp/
+__pycache__/

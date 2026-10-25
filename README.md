@@ -1,545 +1,105 @@
-# Dodo Food
+# 校园预约取餐系统 · Campus Pickup
 
-一个基于 Spring Boot 的外卖点评与商家订单管理系统（Java 练手项目）。
+基于 Java 21 / Spring Boot 3 / MyBatis / MySQL / Redis / RabbitMQ 的后端练习项目。从外卖订单系统改造为校园档口分时预约：每单占一个时段制作名额，下单同时占用菜品库存，取消或超时同时释放，备餐完成后凭取餐码核销。
 
-项目涵盖用户注册登录、餐厅与菜品查询、购物车、订单状态流转、商家管理、用户评价、
-Redis 多级缓存、JWT 鉴权、RabbitMQ Outbox 可靠投递、订单超时自动取消、
-Resilience4j 熔断/隔离、Swagger 文档、JUnit 单元测试以及 Docker 一键部署。
+当前是后端 API 项目，支付为模拟支付，没有学生端页面、真实支付、退款或配送。包名与 Maven 坐标保留 `com.dianping:dianping`，避免无业务价值的全量重命名。
 
-> 在线部署：服务器 `dodo@101.200.221.93`，应用端口 `8080`。
-> Swagger 文档：`http://101.200.221.93:8080/swagger-ui.html`
+## 业务规则
 
----
-
-## 目录
-
-- [技术栈](#技术栈)
-- [项目架构](#项目架构)
-- [功能模块](#功能模块)
-- [项目结构](#项目结构)
-- [快速开始](#快速开始)
-- [数据库初始化](#数据库初始化)
-- [配置说明](#配置说明)
-- [接口文档](#接口文档)
-- [搜索接口性能优化与压测](#搜索接口性能优化与压测)
-- [多级缓存与容错设计](#多级缓存与容错设计)
-- [订单超时自动取消](#订单超时自动取消)
-- [测试](#测试)
-- [部署](#部署)
-
----
-
-## 技术栈
-
-| 分类 | 选型 |
-| --- | --- |
-| 语言/运行时 | Java 21 |
-| 框架 | Spring Boot 3.1.5、Spring MVC |
-| 安全 | Spring Security（依赖已引入，当前 `permitAll`，鉴权实际由 JWT 拦截器完成，详见下文） |
-| 缓存 | Redis 7（Lettuce）、Caffeine（本地缓存） |
-| 消息队列 | RabbitMQ（延迟队列 + 死信队列） |
-| 鉴权 | JWT（jjwt 0.12.3）、BCrypt（`LoginInterceptor` + 控制器内角色校验） |
-| 容错 | Resilience4j 2.2.0（熔断 + 隔离） |
-| API 文档 | Springdoc OpenAPI 2.5.0（Swagger UI） |
-| 校验 | Spring Validation |
-| 测试 | JUnit 5、Mockito |
-| 构建/部署 | Maven、Docker、Docker Compose |
-
----
-
-## 项目架构
+- 档口创建未来取餐时段，容量为订单数，不是菜品份数。一个订单只能买同一档口的菜品。
+- 下单必须提供 `requestId`（1～64 字符）和 `pickupSlotId`。幂等范围为用户；同一键重复提交返回同一订单，不同取餐时段复用同一键会被拒绝。
+- 同一用户修改购物车、下单共用用户行锁。下单在同一事务内占名额、条件扣库存、保存快照、清购物车和写 Outbox；失败全部回滚。
+- 名额通过 `reserved < capacity` 条件更新占用，菜品通过 `stock >= quantity` 条件更新扣减。时段和菜品不使用 Redis 作为库存真相。
+- 支付截止为数据库时间计算的“创建后 30 分钟”和“取餐时段开始”中的较早时间；截止后拒绝支付。
+- 取消仅允许待支付订单；取消与超时处理先竞争订单状态，再释放名额、恢复库存。重复超时消息不重复释放。
+- 完成取餐不释放名额：制作能力已经被消耗。已支付订单暂不支持取消退款。
+- 商家只能操作自己档口的订单，待取餐时校验 32 位随机取餐码，原子更新为已完成。取餐码视为凭证，请勿公开截图或日志。
+- 时段按 Asia/Shanghai 本地时间传输（无时区 ISO 日期时间）。单体 JVM 与 MySQL 部署时统一时区。
 
 ```text
-┌──────────────────────────────────────────────────────┐
-│                     HTTP 客户端                       │
-└───────────────┬──────────────────────────┬───────────┘
-                │                          │
-        ┌───────▼────────┐        ┌───────▼────────┐
-        │  LoginInterceptor │     │  Swagger / Actuator │
-        │  (JWT 解析 + 鉴权) │     └────────────────┘
-        └───────┬────────┘
-                │
-        ┌───────▼────────┐
-        │   Controller    │  @RestController + @Valid
-        └───────┬────────┘
-                │
-        ┌───────▼──────────────────────────────┐
-        │                Service                │
-        │  Order / Restaurant / Cart / Review   │
-        └──┬───────────┬──────────────┬────────┘
-             │           │              │
-     ┌───────▼──┐  ┌─────▼──────┐  ┌───▼────────────┐
-     │  Mapper   │  │ Redis +     │  │  RabbitMQ       │
-     │ (MyBatis) │  │ Caffeine    │  │  Outbox 投递    │
-     └───────┬──┘  └─────────────┘  └────────────────┘
-             │
-        ┌────▼────┐
-        │  MySQL  │
-        └─────────┘
+待支付(0) → 已支付(1) → 制作中(2) → 待取餐(3) → 已完成(4)
+    └──用户取消 / 支付截止──→ 已取消(5)，释放库存与名额
 ```
 
-核心设计要点：
+## 本地运行与双实例
 
-- **多级缓存**：餐厅详情走 Caffeine（L1，30s）+ Redis（L2，30~40min 随机 TTL），L1 未命中时由 `getOrLoad` 回源 L2，再回源 DB。
-- **缓存一致性**：商家修改餐厅信息时，通过本地事件 + DB Outbox 双写，经 RabbitMQ 广播到所有实例失效本地缓存，避免多实例本地缓存不一致。
-- **容错**：Redis 读取走 Resilience4j 熔断，故障时降级到 DB；DB 回源走 Bulkhead 限流，防止缓存击穿打垮数据库。
-- **可靠投递**：订单超时、缓存失效事件先写 `outbox_event` 表（与业务同事务），再由定时任务抢占投递 RabbitMQ，保证至少一次送达。
+需要 JDK 21、Maven 3.9+、Docker Compose、Python 3。推荐使用独立的校园测试环境，不影响旧 Compose 数据卷：
 
----
-
-## 功能模块
-
-### 用户模块
-
-- 用户注册 / 登录
-- BCrypt 密码加密
-- JWT 身份认证（24h 有效期）
-- 获取当前用户信息
-- USER / MERCHANT 角色区分
-
-### 餐厅与菜品
-
-- 查询营业餐厅列表
-- 查询餐厅详情（含平均评分、评价数）
-- 查询餐厅菜品
-- 餐厅关键词搜索（MySQL FULLTEXT + ngram）
-- 按评分、评价数量、最新时间排序
-- 商家修改餐厅信息 / 营业状态
-- 商家菜品新增、修改、上下架、逻辑删除、分页查询
-
-### 购物车
-
-- 添加菜品 / 修改数量 / 删除项 / 查询购物车
-- 同一菜品自动合并数量
-- 库存校验
-- 单餐厅购物车限制
-
-### 订单
-
-- 从购物车创建订单（`requestId` 幂等 + 原子扣库存）
-- 创建订单时保存菜品名称、价格快照
-- 固定库存锁顺序，避免死锁
-- 用户订单分页 / 详情查询
-- 用户支付 / 取消订单（取消时恢复库存）
-- 商家订单分页 / 详情查询
-- 商家订单状态流转
-
-订单状态机：
-
-```text
-待支付 ──支付──► 已支付 ──制作──► 制作中 ──配送──► 配送中 ──完成──► 已完成
-  │
-  └──取消──► 已取消（恢复库存）
-
-待支付超时(30min) ──► 已取消（恢复库存）
+```powershell
+docker compose -f compose.campus.yml up -d --build
+python scripts/smoke_campus.py
 ```
 
-### 评价
+- Nginx 入口：[http://localhost:18080/swagger-ui.html](http://localhost:18080/swagger-ui.html)
+- 实例一：`http://127.0.0.1:18081`；实例二：`http://127.0.0.1:18082`。
+- Compose 不向宿主机暴露 MySQL、Redis、RabbitMQ。应用端口只绑定回环地址。
+- 校园环境的新库由 Flyway 自动建表；首次没有业务演示数据。冒烟脚本创建独立学生、商家、档口、菜品并进行双实例测试，可重复运行，每次保留本次测试数据。
+- 冒烟脚本通过容器数据库为测试商家分配角色，这只是隔离测试夹具；公开注册接口不允许自选商家/管理员身份。
+- `compose.campus.yml` 中的默认凭据仅用于本地。已有 `.env` 的同名变量会覆盖默认值。
+- 停止保留数据：`docker compose -f compose.campus.yml down`。不要对有价值的数据卷使用 `down -v`。
 
-- 仅已完成订单可评价
-- 一个订单只能评价一次（DB 唯一约束保证）
-- 同步维护餐厅 `average_rating` / `review_count` 冗余统计
-- 餐厅评价分页 / 评价摘要 / 我的评价
+单实例旧入口仍可用：复制 `.env.example` 到 `.env`、使数据库应用密码与实际账号一致，再运行 `docker compose up -d --build`。该环境会初始化原有种子数据并执行 V2 迁移。当前 Compose 已包含 RabbitMQ。
 
----
+## 主要 API
 
-## 项目结构
+除注册、登录、搜索、Swagger 和健康探针外均需 `Authorization: Bearer <token>`。普通业务错误沿用现有 `Result` 协议：检查 JSON `code`，成功为 0；未登录为 HTTP 401，管理员越权为 HTTP 403。
 
-```text
-src/main/java/com/dianping
-├── DianpingApplication.java        # 启动类，@EnableScheduling
-├── common/                         # Result / PageResult 统一响应
-├── config/                          # Security / Web / LocalCache / RabbitMQ / OpenAPI
-├── interceptor/                    # LoginInterceptor（JWT 鉴权）
-├── controller/                     # 用户 / 餐厅 / 购物车 / 订单 / 评价 / 商家端
-├── service/                        # 业务逻辑 + 缓存 + Outbox 投递
-├── mapper/                         # MyBatis Mapper（注解 + XML）
-├── entity / dto / vo               # 数据模型
-├── enums/                          # OrderStatus
-├── event / listener                # 本地缓存失效事件
-├── consumer / mq                   # RabbitMQ 消费者
-└── exception/                      # 全局异常处理
-```
-
----
-
-## 快速开始
-
-### 环境要求
-
-- JDK 21
-- Maven 3.9+
-- Docker & Docker Compose（可选，推荐）
-- MySQL 8、Redis 7、RabbitMQ（若本地运行）
-
-### 本地运行
-
-```bash
-# 1. 克隆
-git clone <repo-url>
-cd dianping
-
-# 2. 准备配置（数据库密码、JWT secret 等）
-cp .env.example .env
-#   编辑 .env 填入真实值
-
-# 3. 启动依赖（MySQL / Redis / RabbitMQ）
-docker compose up -d mysql redis
-#   RabbitMQ 需自行准备，或用已有服务
-
-# 4. 初始化数据库（见下一节）
-mysql -h127.0.0.1 -P3307 -uroot -p < docker/mysql/01-init.sql
-mysql -h127.0.0.1 -P3307 -uroot -p dodo_food < docker/mysql/02-data.sql
-
-# 5. 编译运行
-./mvnw clean package -DskipTests
-SPRING_DATASOURCE_PASSWORD=xxx JWT_SECRET=xxx \
-  ./mvnw spring-boot:run
-```
-
-访问 `http://localhost:8080/swagger-ui.html` 查看接口文档。
-
-### Docker Compose 一键启动
-
-```bash
-cp .env.example .env   # 填入密码 / secret
-docker compose up -d --build
-```
-
-> 注意：当前 `docker-compose.yml` 未内置 RabbitMQ 服务，且未向 `app` 注入 `RABBITMQ_*` 环境变量。
-> 若使用 Outbox / 订单超时功能，请额外准备 RabbitMQ 并在 `.env` / compose 中补齐
-> `RABBITMQ_HOST`、`RABBITMQ_USERNAME`、`RABBITMQ_PASSWORD`。
-
----
-
-## 数据库初始化
-
-建表脚本位于 `docker/mysql/01-init.sql`（Docker 自动加载），`schema.sql` 为本地参考脚本，
-种子数据见 `docker/mysql/02-data.sql`。
-
-核心表：`user`、`restaurant`、`dish`、`cart_item`、`orders`、`order_item`、`review`、`outbox_event`。
-
-关键索引设计：
-
-- `dish(restaurant_id, deleted, status, created_at DESC, id DESC)` —— 商家菜品分页
-- `orders(user_id, created_at DESC, id DESC)` —— 用户订单分页
-- `orders(restaurant_id, status, created_at DESC, id DESC)` —— 商家订单分页
-- `restaurant(status, created_at DESC, id DESC)` —— 营业餐厅列表
-- `restaurant FULLTEXT ft_restaurant_name_ngram(name) WITH PARSER ngram` —— 中文搜索
-- `review(order_id) UNIQUE` —— 一订单一评价
-
----
-
-## 配置说明
-
-全部可配置项通过环境变量注入（见 `application.yml`、`.env.example`）：
-
-| 环境变量 | 说明 | 默认 |
+| 方法 | 路径 | 用途 |
 | --- | --- | --- |
-| `SPRING_DATASOURCE_URL` | MySQL 连接串 | 本地 `dodo_food` |
-| `SPRING_DATASOURCE_USERNAME` / `PASSWORD` | DB 账号 | root / 无默认 |
-| `SPRING_DATASOURCE_HIKARI_MAXIMUM_POOL_SIZE` | 连接池上限 | 30 |
-| `SPRING_DATA_REDIS_HOST` / `PORT` | Redis 地址 | localhost:6379 |
-| `RABBITMQ_HOST` / `PORT` / `USERNAME` / `PASSWORD` | RabbitMQ | localhost:5672 / 无默认 |
-| `JWT_SECRET` | JWT 签名密钥（≥32 字符） | 弱默认值，生产必须覆盖 |
+| POST | `/users/register`、`/users/login` | 注册、登录 |
+| POST | `/merchant/pickup-slots` | 商家创建时段：`startsAt`、`endsAt`、`capacity` |
+| GET | `/restaurants/{id}/pickup-slots` | 最多 100 个未来未满时段，余量仅供展示，下单时重新校验 |
+| POST | `/cart/items` | 加购物车：`dishId`、`quantity` |
+| POST | `/orders/create` | 预约下单：`requestId`、`pickupSlotId` |
+| GET | `/orders/{id}` | 本人订单详情，包含时段 ID、取餐码和支付截止时间 |
+| PUT | `/orders/{id}/pay`、`/orders/{id}/cancel` | 模拟支付、取消 |
+| PUT | `/merchant/orders/{id}/prepare` | 开始制作 |
+| PUT | `/merchant/orders/{id}/ready` | 标记待取餐 |
+| PUT | `/merchant/orders/{id}/pickup` | 核销：`{"pickupCode":"订单中的32位码"}` |
+| POST | `/admin/cache-recovery/start`、`/stop` | 仅 ADMIN 启停死信重放 |
+| GET | `/actuator/health/liveness`、`/readiness` | 存活 / 依赖就绪检查 |
 
-HikariCP / Lettuce / Resilience4j（熔断 `redisCache`、隔离 `restaurantDb`）参数均在 `application.yml` 中，
-按压测结果调优。
+旧 `/deliver`、`/complete` 接口已移除，避免绕过凭码核销。餐厅、菜品、评价、搜索、商家管理的其他接口见 Swagger。
 
----
+## 可靠性与一致性边界
 
-## 接口文档
+- MySQL 是订单、库存和名额的最终依据。订单状态条件更新裁决并发支付、取消、核销。
+- 固定锁顺序：同用户购物车锁 → 时段容量 → 菜品 ID 升序；取消先订单状态 → 时段 → 菜品升序。
+- Outbox 与业务同事务，定时投递使用 publisher confirm、return 检查、失败重试和 PROCESSING 恢复；属于至少一次投递，消费者必须幂等。达到最大重试的 FAILED 事件需要运营排查，不承诺无限重试。
+- 订单 MQ 延迟队列为 30 分钟；更早的时段开始截止由每 60 秒扫描兜底。正常无积压时提前截止订单的释放可能延迟约一分钟；故障/积压时更长。支付 SQL 始终检查实际截止时间。
+- 详情缓存：Caffeine L1（30 秒）+ Redis L2（随机 TTL）。修改事务提交后清当前 L1，持久队列补偿删除 Redis，再经 fanout 发送到每实例独立匿名队列清 L1。
+- 广播为最终一致性。断线实例可能漏收；并发回填可能产生旧值。L1 TTL 限制单次本地条目的寿命，但不代表端到端旧值一定在 30 秒内消失，L2 回填竞态仍需后续版本化治理。搜索缓存约 2 分钟过期，未实现精确失效。
+- Redis 失败降级 DB，回源通过 Bulkhead 隔离；补齐 AOP 依赖使 Resilience4j 注解生效。
 
-启动后访问 Swagger UI：`/swagger-ui.html`，OpenAPI JSON：`/v3/api-docs`。
+## 数据库迁移
 
-主要接口分组：
+唯一版本来源为 `src/main/resources/db/migration/`：V1 为旧基础表，V2 增加预约时段与订单字段。原 `schema.sql`、`docker/mysql/01-init.sql` 保留作旧版参考，不能当成校园完整结构重复执行。
 
-| 模块 | 前缀 | 鉴权 |
-| --- | --- | --- |
-| 用户 | `/users` | 注册/登录免鉴权，其余需登录 |
-| 餐厅 | `/restaurants` | 搜索免鉴权，其余需登录 |
-| 购物车 | `/cart` | 登录 |
-| 订单 | `/orders` | 登录 |
-| 评价 | `/reviews` | 登录 |
-| 商家端 | `/merchant/**` | MERCHANT 角色（控制器内 `checkMerchant`） |
-| 管理端 | `/admin/cache-recovery` | 仅登录，**暂无 ADMIN 校验**（已知问题，待修复） |
+- 空库：Flyway 执行 V1、V2。
+- 已有无 Flyway 的旧库：备份并核对结构后，以版本 1 baseline，执行 V2。`baseline-on-migrate` 仅适用于结构确实与旧版一致的数据库，不能用于掩盖未知结构差异。
+- 旧订单保留空时段字段，截止时间回填为创建后 30 分钟；旧待支付订单仍可超时取消。旧配送状态 3 与校园待取餐状态 3 的业务含义不同，且旧订单没有取餐码：迁移前应结清旧履约订单，不能直接作为校园订单核销。
+- 不改动已执行的版本文件；后续结构调整增加 V3。发版先做可恢复数据库备份；应用回滚不自动回滚数据库。
 
-请求头携带 `Authorization: Bearer <token>`。
+## 测试与 CI/CD
 
-> **鉴权现状说明**：项目虽引入了 `spring-boot-starter-security`，但 `SecurityConfig`
-> 当前为 `csrf().disable()` + `anyRequest().permitAll()`，即 Spring Security 过滤链未实际生效。
-> 真正的鉴权由 `LoginInterceptor`（解析 JWT、写入 `userId/role/restaurantId` 请求属性）+
-> 各商家控制器内部的 `checkMerchant` 完成。`/admin/cache-recovery/**` 目前仅校验登录、
-> 未校验 ADMIN 角色，属已知问题，后续计划改为基于 Spring Security 过滤链的统一鉴权
-> （`JwtAuthenticationFilter` + `hasRole`）。
-
----
-
-## 搜索接口性能优化与压测
-
-项目使用约 10 万条餐厅数据对搜索接口进行压力测试，并通过 JMeter、
-MySQL `EXPLAIN ANALYZE` 对接口瓶颈进行定位和优化。
-
-### 1. 初始问题
-
-餐厅搜索最初采用模糊匹配：
-
-```sql
-WHERE name LIKE '%keyword%'
+```powershell
+mvn -B test        # 单元测试，不要求 Docker
+mvn -B clean verify  # 单元测试 + Testcontainers 真实 MySQL 集成并发测试 + 打包
+python scripts/smoke_campus.py # 已启动的校园双实例环境端到端测试
 ```
 
-并在搜索过程中关联评价表，通过 `AVG()`、`COUNT()` 实时计算餐厅评分和评价数量。
+集成测试验证：100 请求争 20 名额、最后一份库存、失败回滚、同键并发幂等、不同请求竞争同一购物车、跨档口/过期时段拒绝、重复超时/取消、支付竞争、凭码核销及释放失败回滚。Testcontainers 需要运行中的 Docker，缺失时测试失败，不静默跳过。
 
-在约 100,000 条餐厅数据下，搜索“烧烤”约命中 12,351 条记录。初始执行计划显示：
+GitHub Actions 对 main/master 推送与 PR 执行 `clean verify`、构建运行双实例 Docker、执行 API/缓存广播冒烟，保存测试报告和 JAR。
 
-- `LIKE '%keyword%'` 难以有效利用普通 B+Tree 索引；
-- 搜索需要扫描约 100,000 条餐厅记录；
-- `LEFT JOIN review + GROUP BY` 增加了聚合成本；
-- 排序后才能执行 `LIMIT`；
-- 单次复杂查询约需要 263 ms。
+CD 为 workflow_dispatch 手动触发，仅 master 可部署，需勾选已备份数据库，并配置 production 环境的 `ECS_HOST`、`ECS_USER`、`ECS_SSH_KEY`、`ECS_KNOWN_HOSTS`。已核实主机公钥后填写 known_hosts。沿用旧服务器目录 `/home/dodo/projects/dianping/target` 与 systemd 服务 `dianping`；服务环境须提供 MySQL、Redis、RabbitMQ、JWT 配置，运行 Java 21，允许部署账号重启该服务。部署检查 readiness，失败尝试恢复旧 JAR并重新检查；数据库不自动回滚。首次部署尚无旧 JAR 时需要手工完成服务初始化。
 
-### 2. 使用 FULLTEXT 优化中文模糊搜索
+## 是否需要阿里云
 
-为餐厅名称建立 MySQL FULLTEXT 全文索引，并使用 ngram parser 支持中文搜索：
+当前不必购买云服务器。单机 Docker 中两个独立 JVM 足以验证数据库竞争、跨实例幂等、缓存广播和负载均衡；本项目提供现成环境。
 
-```sql
-FULLTEXT INDEX ft_idx_name(name) WITH PARSER ngram
-```
+它不能证明跨机器故障隔离或生产吞吐。同机压测会共享 CPU、内存、磁盘与网络，结果只能作为本机基线。需要公网展示时再部署；需要可信性能测试时把负载发生器与被测服务分开，并记录机器规格、数据量、缓存冷热、成功率、P95 和数据库锁等待。没有流量目标和测量结果之前不承诺需要某个服务器规格，也不必为了简历先购买多台机器。
 
-查询由 `name LIKE '%烧烤%'` 调整为：
+## 计划与历史记录
 
-```sql
-MATCH(name) AGAINST('烧烤' IN NATURAL LANGUAGE MODE)
-```
-
-使搜索从全表扫描转为全文索引检索。优化后 MySQL 通过 `ft_idx_name` 获取约 12,351 个匹配结果，
-避免直接扫描全部约 100,000 条餐厅记录。
-
-### 3. 优化评分聚合
-
-原搜索 SQL 会先关联 `review` 表，再对大量候选餐厅执行 `AVG(rating)` / `COUNT(review.id)` / `GROUP BY restaurant_id`。
-对于 `latest` 排序，将查询调整为先完成餐厅搜索和分页，再处理当前页需要的数据，
-避免先对全部匹配餐厅进行评价聚合。
-
-进一步在 `restaurant` 表中增加冗余统计字段 `average_rating`、`review_count`，
-新增评价时在事务中同步更新餐厅统计信息，从而使搜索接口可以直接读取餐厅评分和评价数量，
-而不需要每次搜索实时扫描评价表聚合。
-
-当前测试库的评价数据量较小，因此该优化在现阶段压测中性能收益不明显，
-主要用于避免评价数据规模扩大后实时聚合成为新的查询瓶颈。
-
-### 4. 定位分页 COUNT(*) 瓶颈
-
-分页接口最初除了查询当前页数据，还会执行：
-
-```sql
-SELECT COUNT(*)
-FROM restaurant
-WHERE status = 1
-  AND MATCH(name) AGAINST('烧烤' IN BOOLEAN MODE);
-```
-
-`EXPLAIN ANALYZE` 显示：Full-text index search `actual rows = 12,351`，COUNT 查询总耗时约 167 ms。
-虽然使用了全文索引，但为了得到精确的 `total`，MySQL 仍然必须遍历全部 12,351 个匹配结果。
-
-使用相同 JMeter 参数进行 A/B 测试（50 并发、每线程循环 20 次、Ramp-up 10 秒、总计 1000 次请求）：
-
-| 指标 | 保留 COUNT(*) | 去除 COUNT(*) |
-| --- | ----------: | ----------: |
-| Average | 1647 ms | 795 ms |
-| Median | 1658 ms | 793 ms |
-| P95 | 2453 ms | 1311 ms |
-| P99 | 3065 ms | 1538 ms |
-| Throughput | 26.5 req/s | 49.5 req/s |
-| Error Rate | 0% | 0% |
-
-去除精确 `COUNT(*)` 后平均响应时间降低约 52%，吞吐量提高约 87%。
-说明精确统计搜索结果总数是高并发搜索接口的重要瓶颈之一。
-
-### 5. 将 total 分页改为 hasNext
-
-搜索场景不强依赖精确总记录数，因此将分页方式由 `records + total` 调整为 `records + hasNext`：
-请求 `pageSize = 10` 时数据库实际查询 `LIMIT 11`，返回 11 条则 `hasNext = true` 且只向前端返回前 10 条。
-
-在 20 并发、1000 次请求的测试中，hasNext 版本：
-
-| 指标 | 结果 |
-| --- | ---: |
-| Average | 213 ms |
-| Median | 155 ms |
-| P90 | 415 ms |
-| P95 | 426 ms |
-| P99 | 445 ms |
-| Error Rate | 0% |
-| Throughput | 66.8 req/s |
-
-### 6. 主查询执行计划
-
-优化后的核心搜索 SQL：
-
-```sql
-SELECT r.id, r.name, r.description, r.address, r.average_rating, r.review_count
-FROM restaurant r
-WHERE r.status = 1
-  AND MATCH(r.name) AGAINST('烧烤' IN NATURAL LANGUAGE MODE)
-ORDER BY r.created_at DESC, r.id DESC
-LIMIT 10;
-```
-
-`EXPLAIN ANALYZE` 显示：Full-text index search 约 55.6 ms → 过滤后 12,351 条匹配记录约 61.7 ms
-→ 排序 + LIMIT 10 约 78.8 ms。主要成本集中在高频关键词命中的大量 FULLTEXT 候选记录及其排序。
-
-### 7. 并发饱和点测试
-
-不同并发数梯度测试：
-
-| 并发数 | Average | P95 | Throughput |
-| --: | --: | --: | --: |
-| 1 | 103 ms | 130 ms | 9.7 req/s |
-| 5 | 78 ms | 124 ms | 41.9 req/s |
-| 10 | 159 ms | 216 ms | 49.0 req/s |
-| 20 | 269 ms | 430 ms | 57.7 req/s |
-| 50 | 683 ms | 1107 ms | 52.0 req/s |
-| 100 | 1439 ms | 2004 ms | 48.8 req/s |
-
-HikariCP 配置 `maximum-pool-size: 30`、`minimum-idle: 10`。吞吐量在约 20 并发附近达到较高水平，
-继续增加到 50、100 并发后 TS 不再增加反而略降，平均响应和 P95 快速上升。
-说明连接池大小不等于系统最佳并发数，系统吞吐同时受 MySQL FULLTEXT 查询、CPU、连接竞争影响。
-
-### 8. 优化总结
-
-```text
-JMeter 建立性能基线
-      ↓
-EXPLAIN ANALYZE 定位 SQL 成本
-      ↓
-LIKE '%keyword%' → FULLTEXT ngram
-      ↓
-减少大范围 JOIN / GROUP BY
-      ↓
-评分和评价数冗余
-      ↓
-定位精确 COUNT(*) 瓶颈
-      ↓
-total 分页 → hasNext 分页
-      ↓
-并发梯度测试寻找系统饱和区域
-```
-
-主要结论：
-
-1. 对中文包含式搜索，普通 B+Tree 索引无法有效解决 `%keyword%` 查询，FULLTEXT ngram 更适合当前场景。
-2. 分页中的精确 `COUNT(*)` 可能比查询当前页数据本身更昂贵。
-3. 对高频读取、低频更新的聚合数据，可通过冗余字段降低实时计算成本。
-4. 数据库连接池不是越大越好，超过数据库实际处理能力后，增加并发主要表现为等待时间增加而非吞吐提升。
-5. 性能优化应通过执行计划和控制变量压测验证，而非仅凭经验调整参数。
-
----
-
-## 多级缓存与容错设计
-
-### 餐厅详情多级缓存
-
-- **L1 Caffeine**：本地缓存，`maximumSize=1000`、`expireAfterWrite=30s`，单实例命中极快。
-- **L2 Redis**：分布式缓存，TTL 30~40 分钟随机抖动，防止缓存雪崩。
-- 未命中时由 `RestaurantLocalCacheService.getOrLoad` 统一回源：L1 → L2 → DB，并逐级回填。
-- 空值缓存：DB 中不存在的餐厅写入 `__NULL__` 占位（5 分钟），防缓存穿透。
-
-### 搜索热点缓存
-
-- 热点搜索采用 Redis Cache Aside，key 由 `keyword:sort:page:pageSize` 组合，TTL 2 分钟。
-- 20 并发、1000 请求、重复热点查询场景下：平均响应 213ms → 5ms，P95 426ms → 10ms，吞吐 66.8 → 197.6 req/s。
-
-### Redis 故障降级与熔断
-
-- Redis 读取/写入经 `RestaurantCacheService` 包裹 Resilience4j 熔断器 `redisCache`（10 次窗口、50% 失败率、开 10s）。
-- 故障时降级回源 MySQL，保证查询可用。
-- 故障注入发现每个请求仍会等待 Redis 命令超时，故将 `timeout` 调低至 300ms，
-  并在一次请求中读缓存失败即跳过后续缓存写入，把故障请求从约 6s 降到约 400ms。
-- 进一步增加短时间依赖熔断：冷却窗口内直接跳过 Redis，周期性探测恢复，避免长时间不可用时每请求重复等待超时。
-
-### DB 回源隔离
-
-- 餐厅详情 DB 回源走 Resilience4j Bulkhead `restaurantDb`（`max-concurrent-calls=20`），
-  防止缓存击穿时并发回源打垮数据库，超限直接返回“系统繁忙”。
-
-### 缓存一致性（Outbox + 广播）
-
-商家修改餐厅信息时：
-
-1. 同事务写 `restaurant` 表 + `outbox_event`（`RESTAURANT_CACHE_EVICT`）；
-2. 发本地 `RestaurantChangedEvent`，事务提交后失效本实例 L1；
-3. `OutboxPublisherService` 定时抢占 outbox 事件，投递到 RabbitMQ `restaurant.cache.evict` 队列；
-4. 所有实例的 `RestaurantCacheEvictConsumer` 消费消息，失效各自 L1 + L2，保证多实例一致。
-
----
-
-## 订单超时自动取消
-
-采用 RabbitMQ 延迟队列 + 定时兜底双重保障：
-
-1. 创建订单时同事务写 `outbox_event`（`ORDER_TIMEOUT_CHECK`）；
-2. Outbox 投递到 `order.timeout.delay` 队列（TTL 30 分钟）；
-3. 30 分钟后消息死信到 `order.timeout.exchange` → `order.timeout.check` 业务队列；
-4. `OrderTimeoutConsumer` 消费，调用 `timeoutCancelOrder`：`待支付 → 已取消` 并恢复库存；
-5. `OrderTimeoutRecoveryService` 每 60s 扫描超时未支付订单兜底，避免 MQ 异常时漏取消。
-
-幂等：`timeoutCancelOrder` 通过 `WHERE status = 待支付` 的条件更新保证只有一个线程真正取消并恢复库存。
-
----
-
-## 测试
-
-单元测试基于 JUnit 5 + Mockito，覆盖核心服务逻辑：
-
-```bash
-./mvnw test
-```
-
-测试类：
-
-- `OrderServiceTest` —— 订单创建、扣库存、取消、超时取消
-- `RestaurantServiceTest` —— 餐厅详情缓存、搜索、降级
-- `ReviewServiceTest` —— 评价创建、统计更新、重复评价
-
----
-
-## 部署
-
-### 服务器部署
-
-应用已部署至 `dodo@101.200.221.93`：
-
-- 应用端口：`8080`
-- Swagger：`http://101.200.221.93:8080/swagger-ui.html`
-- 健康检查：`http://101.200.221.93:8080/actuator/health`
-
-### Docker 镜像
-
-```dockerfile
-FROM eclipse-temurin:21-jre
-WORKDIR /app
-COPY target/dianping-0.0.1-SNAPSHOT.jar app.jar
-EXPOSE 8080
-ENTRYPOINT ["java", "-jar", "app.jar"]
-```
-
-构建：
-
-```bash
-./mvnw clean package -DskipTests
-docker build -t dodo-food .
-```
-
-### 压测数据生成
-
-- `scripts/generate_restaurant_data.py` —— 生成约 10 万条餐厅测试数据
-- `scripts/performance_indexes.sql` —— 性能优化相关索引
-- `scripts/restaurant_test_data.sql` —— 种子数据
-- `scripts/search_keywords.csv` —— 压测关键词集
-
----
-
-## License
-
-仅用于学习交流。
+见 [TODO.md](TODO.md)。旧外卖版本说明与性能记录保存在 [docs/legacy-performance.md](docs/legacy-performance.md)，其中数字仅属于旧版本和原测试条件，不能直接作为校园版本或双实例性能结论。

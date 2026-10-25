@@ -5,10 +5,10 @@ WORKDIR /build
 
 # 先拷 pom 利用层缓存下载依赖
 COPY pom.xml .
-RUN mvn -B -q dependency:go-offline
+RUN --mount=type=cache,target=/root/.m2 mvn -B -q dependency:go-offline
 
 COPY src ./src
-RUN mvn -B -q clean package -DskipTests
+RUN --mount=type=cache,target=/root/.m2 mvn -B -q clean package -DskipTests
 
 FROM eclipse-temurin:21-jre
 

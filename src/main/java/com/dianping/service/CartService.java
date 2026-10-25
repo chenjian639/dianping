@@ -10,11 +10,19 @@ import com.dianping.mapper.DishMapper;
 import com.dianping.vo.CartItemVO;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
+import com.dianping.mapper.OrderMapper;
 
 import java.util.List;
 
 @Service
 public class CartService {
+    @Autowired
+    private OrderMapper orderMapper;
+
+    private void lockCart(Long userId) {
+        if (orderMapper.lockUser(userId) == null) throw new BusinessException("用户不存在");
+    }
 
     @Autowired
     private CartItemMapper cartItemMapper;
@@ -22,7 +30,9 @@ public class CartService {
     @Autowired
     private DishMapper dishMapper;
 
+    @Transactional
     public void addItem(Long userId, AddCartItemDTO dto) {
+        lockCart(userId);
 
         Dish dish = dishMapper.selectById(dto.getDishId());
 
@@ -33,6 +43,9 @@ public class CartService {
         if (dish.getStatus() != 1) {
             throw new BusinessException("菜品已下架");
         }
+
+        if (dto.getQuantity() == null || dto.getQuantity() < 1 || dto.getQuantity() > dish.getStock())
+            throw new BusinessException("购物车数量超过菜品库存或不合法");
 
         List<Long> restaurantIds =
                 cartItemMapper.selectRestaurantIdsByUserId(userId);
@@ -83,10 +96,13 @@ public class CartService {
         return cartItemMapper.selectCartByUserId(userId);
     }
 
+    @Transactional
     public void updateQuantity(
             Long userId,
             Long cartItemId,
             Integer quantity) {
+        lockCart(userId);
+        if (quantity == null || quantity < 1) throw new BusinessException("数量必须大于零");
 
         int rows = cartItemMapper.updateQuantity(
                 cartItemId,
@@ -99,7 +115,9 @@ public class CartService {
         }
     }
 
+    @Transactional
     public void deleteItem(Long userId, Long cartItemId) {
+        lockCart(userId);
 
         int rows = cartItemMapper.deleteById(
                 cartItemId,
@@ -111,10 +129,13 @@ public class CartService {
         }
     }
 
+    @Transactional
     public void updateCartItem(
             Long userId,
             Long cartItemId,
             UpdateCartItemDTO dto) {
+        lockCart(userId);
+        if (dto.getQuantity() == null || dto.getQuantity() < 1) throw new BusinessException("数量必须大于零");
 
         CartItem cartItem =
                 cartItemMapper.selectByIdAndUserId(
