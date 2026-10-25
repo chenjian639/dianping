@@ -54,50 +54,168 @@ jobs:
         if: always()
         run: docker compose -f compose.campus.yml down -v
 
-  deploy:
-    if: github.event_name == 'workflow_dispatch' && inputs.deploy && inputs.database_backup_confirmed && github.ref == 'refs/heads/master'
-    needs: verify
-    runs-on: ubuntu-latest
-    environment: production
-    concurrency:
-      group: campus-production
-      cancel-in-progress: false
-    steps:
-      - uses: actions/download-artifact@v4
-        with:
-          name: campus-jar
-      - name: Configure verified SSH host
-        env:
-          SSH_PRIVATE_KEY: ${{ secrets.ECS_SSH_KEY }}
-          SSH_KNOWN_HOSTS: ${{ secrets.ECS_KNOWN_HOSTS }}
-        run: |
-          install -m 700 -d ~/.ssh
-          printf '%s\n' "$SSH_PRIVATE_KEY" > ~/.ssh/campus_deploy
-          chmod 600 ~/.ssh/campus_deploy
-          printf '%s\n' "$SSH_KNOWN_HOSTS" > ~/.ssh/known_hosts
-      - name: Upload and restart with readiness rollback
-        env:
-          ECS_HOST: ${{ secrets.ECS_HOST }}
-          ECS_USER: ${{ secrets.ECS_USER }}
-        run: |
-          scp -i ~/.ssh/campus_deploy dianping-0.0.1-SNAPSHOT.jar "$ECS_USER@$ECS_HOST:/home/dodo/projects/dianping/target/dianping-new.jar"
-          ssh -i ~/.ssh/campus_deploy "$ECS_USER@$ECS_HOST" 'bash -s' <<'REMOTE'
-          set -euo pipefail
-          cd /home/dodo/projects/dianping/target
-          test -f dianping-0.0.1-SNAPSHOT.jar
-          cp dianping-0.0.1-SNAPSHOT.jar dianping-backup.jar
-          mv dianping-new.jar dianping-0.0.1-SNAPSHOT.jar
-          healthy() {
-            for attempt in {1..24}; do
-              if curl --fail --silent http://127.0.0.1:8080/actuator/health/readiness | grep -q '"status":"UP"'; then return 0; fi
-              sleep 5
+    deploy:
+      if: >-
+        github.ref == format('refs/heads/{0}', github.event.repository.default_branch) &&
+        (github.event_name == 'push' ||
+        (github.event_name == 'workflow_dispatch' &&
+        inputs.deploy && inputs.database_backup_confirmed))
+      needs: verify
+      runs-on: ubuntu-24.04
+      timeout-minutes: 30
+      concurrency:
+        group: campus-production
+        cancel-in-progress: false
+  
+      steps:
+        - uses: actions/checkout@v4
+  
+        - uses: actions/download-artifact@v4
+          with:
+            name: campus-jar
+            path: target
+  
+        - name: Configure SSH
+          env:
+            SSH_KEY: ${{ secrets.SERVER_SSH_KEY }}
+            KNOWN_HOSTS: ${{ secrets.SERVER_KNOWN_HOSTS }}
+          run: |
+            install -m 700 -d ~/.ssh
+            printf '%s\n' "$SSH_KEY" > ~/.ssh/deploy_key
+            printf '%s\n' "$KNOWN_HOSTS" > ~/.ssh/known_hosts
+            chmod 600 ~/.ssh/deploy_key ~/.ssh/known_hosts
+  
+        - name: Package and upload
+          env:
+            SERVER_HOST: ${{ secrets.SERVER_HOST }}
+            SERVER_USER: ${{ secrets.SERVER_USER }}
+            RELEASE_ID: ${{ github.run_id }}-${{ github.run_attempt }}
+          run: |
+            test -s target/dianping-0.0.1-SNAPSHOT.jar
+            test -f compose.server.yml
+            test -f docker/nginx/server.conf
+  
+            git archive --format=tar HEAD > "$RUNNER_TEMP/source.tar"
+            mkdir -p "$RUNNER_TEMP/release"
+            tar -xf "$RUNNER_TEMP/source.tar" -C "$RUNNER_TEMP/release"
+  
+            mkdir -p "$RUNNER_TEMP/release/target"
+            cp target/dianping-0.0.1-SNAPSHOT.jar \
+              "$RUNNER_TEMP/release/target/"
+  
+            # 密码配置始终使用服务器上的版本。
+            tar --exclude='.env' --exclude='.env.*' \
+              -czf "$RUNNER_TEMP/release.tgz" \
+              -C "$RUNNER_TEMP/release" .
+  
+            scp -i ~/.ssh/deploy_key \
+              -o BatchMode=yes \
+              -o StrictHostKeyChecking=yes \
+              "$RUNNER_TEMP/release.tgz" \
+              "$SERVER_USER@$SERVER_HOST:/home/ubuntu/campus-deploy/incoming/$RELEASE_ID.tgz"
+  
+        - name: Deploy and check readiness
+          env:
+            SERVER_HOST: ${{ secrets.SERVER_HOST }}
+            SERVER_USER: ${{ secrets.SERVER_USER }}
+            RELEASE_ID: ${{ github.run_id }}-${{ github.run_attempt }}
+          run: |
+            ssh -i ~/.ssh/deploy_key \
+              -o BatchMode=yes \
+              -o StrictHostKeyChecking=yes \
+              -o ConnectTimeout=20 \
+              -o ServerAliveInterval=30 \
+              "$SERVER_USER@$SERVER_HOST" \
+              bash -se -- "$RELEASE_ID" <<'REMOTE'
+            set -euo pipefail
+            umask 077
+  
+            RELEASE_ID="$1"
+            PROJECT=/home/ubuntu/campus-pickup
+            INCOMING=/home/ubuntu/campus-deploy/incoming
+            STAGE="$INCOMING/$RELEASE_ID"
+            BACKUP="/home/ubuntu/campus-deploy/backups/$RELEASE_ID"
+  
+            exec 9>/home/ubuntu/campus-deploy/deploy.lock
+            flock -w 1200 9
+  
+            mkdir -p "$STAGE" "$BACKUP"
+            tar -xzf "$INCOMING/$RELEASE_ID.tgz" -C "$STAGE"
+  
+            test -f "$PROJECT/.env.server"
+            test -s "$STAGE/target/dianping-0.0.1-SNAPSHOT.jar"
+  
+            compose() {
+              sudo -n docker compose \
+                -p campus-server \
+                --env-file "$PROJECT/.env.server" \
+                -f "$PROJECT/compose.server.yml" "$@"
+            }
+  
+            # 每次更新前备份现有项目和数据库。
+            tar -czf "$BACKUP/project.tar.gz" \
+              -C /home/ubuntu campus-pickup
+  
+            compose exec -T mysql sh -c \
+              'exec mysqldump -uroot -p"$MYSQL_ROOT_PASSWORD" --single-transaction --no-tablespaces --routines --triggers --events "$MYSQL_DATABASE"' \
+              > "$BACKUP/database.sql"
+  
+            test -s "$BACKUP/database.sql"
+  
+            # 先校验新配置，再构建运行镜像。
+            sudo -n docker compose \
+              -p campus-server \
+              --env-file "$PROJECT/.env.server" \
+              -f "$STAGE/compose.server.yml" config --quiet
+  
+            printf '%s\n' \
+              'FROM eclipse-temurin:21-jre' \
+              'WORKDIR /app' \
+              'COPY target/dianping-0.0.1-SNAPSHOT.jar app.jar' \
+              'ENTRYPOINT ["java", "-jar", "app.jar"]' \
+              > "$STAGE/Dockerfile.runtime"
+  
+            # 使用独立标签构建，成功后才替换正式镜像标签。
+            sudo -n docker build \
+              -f "$STAGE/Dockerfile.runtime" \
+              -t "campus-pickup:release-$RELEASE_ID" "$STAGE"
+  
+            rm "$STAGE/Dockerfile.runtime"
+  
+            # 同步代码，保留服务器的环境配置和 Git 信息。
+            rsync -a --delete \
+              --exclude='.env' \
+              --exclude='.env.*' \
+              --exclude='.git' \
+              "$STAGE/" "$PROJECT/"
+  
+            sudo -n docker tag \
+              "campus-pickup:release-$RELEASE_ID" \
+              campus-pickup:server
+  
+            # 只更新应用和网关，复用现有数据库等容器。
+            compose up -d --no-deps --no-build app
+            compose up -d --no-deps --no-build \
+              --force-recreate gateway
+  
+            for attempt in $(seq 1 60); do
+              if curl --fail --silent --max-time 5 \
+                http://127.0.0.1:8088/actuator/health/readiness |
+                python3 -c 'import json,sys; sys.exit(0 if json.load(sys.stdin).get("status") == "UP" else 1)'
+              then
+                echo "Deployment successful: $RELEASE_ID"
+                rm -rf "$STAGE"
+                rm -f "$INCOMING/$RELEASE_ID.tgz"
+                exit 0
+              fi
+              sleep 3
             done
-            return 1
-          }
-          if sudo -n /usr/bin/systemctl restart dianping && healthy; then exit 0; fi
-          cp dianping-backup.jar dianping-0.0.1-SNAPSHOT.jar
-          sudo -n /usr/bin/systemctl restart dianping
-          healthy || echo 'Rollback health check failed; inspect the service and database backup.'
-          echo 'Deployment failed; application rollback attempted. Database migrations are not rolled back.'
-          exit 1
-          REMOTE
+  
+            echo "Readiness check failed. Backup: $BACKUP"
+            compose ps
+            exit 1
+            REMOTE
+  
+        - name: Remove SSH key
+          if: always()
+          run: rm -f ~/.ssh/deploy_key
