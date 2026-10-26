@@ -1,0 +1,82 @@
+name: campus-server
+x-logs: &logs
+  driver: json-file
+  options: {max-size: 10m, max-file: '3'}
+services:
+  mysql:
+    image: mysql:8.0
+    restart: unless-stopped
+    mem_limit: 768m
+    command: [--innodb-buffer-pool-size=192M, --max-connections=60]
+    environment:
+      TZ: Asia/Shanghai
+      MYSQL_DATABASE: dodo_food
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:?Generate .env.server first}
+      MYSQL_USER: campus
+      MYSQL_PASSWORD: ${MYSQL_PASSWORD:?Generate .env.server first}
+    volumes: [mysql_data:/var/lib/mysql]
+    logging: *logs
+    healthcheck:
+      test: [CMD-SHELL, 'mysqladmin ping -h localhost -uroot -p"$$MYSQL_ROOT_PASSWORD"']
+      interval: 5s
+      timeout: 5s
+      retries: 40
+  redis:
+    image: redis:7
+    restart: unless-stopped
+    mem_limit: 192m
+    command: [redis-server, --maxmemory, 96mb, --maxmemory-policy, allkeys-lru]
+    logging: *logs
+    healthcheck:
+      test: [CMD, redis-cli, ping]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+  rabbitmq:
+    image: rabbitmq:3.13-management
+    restart: unless-stopped
+    mem_limit: 512m
+    environment:
+      RABBITMQ_DEFAULT_USER: campus
+      RABBITMQ_DEFAULT_PASS: ${RABBITMQ_PASSWORD:?Generate .env.server first}
+    volumes: [rabbitmq_data:/var/lib/rabbitmq]
+    logging: *logs
+    healthcheck:
+      test: [CMD, rabbitmq-diagnostics, -q, ping]
+      interval: 5s
+      timeout: 5s
+      retries: 40
+  app:
+    build: .
+    image: campus-pickup:server
+    restart: unless-stopped
+    mem_limit: 768m
+    environment:
+      TZ: Asia/Shanghai
+      JAVA_TOOL_OPTIONS: -Duser.timezone=Asia/Shanghai -Xms128m -Xmx384m
+      SPRING_DATASOURCE_URL: jdbc:mysql://mysql:3306/dodo_food?useUnicode=true&characterEncoding=utf8&serverTimezone=Asia/Shanghai&allowPublicKeyRetrieval=true&useSSL=false
+      SPRING_DATASOURCE_USERNAME: campus
+      SPRING_DATASOURCE_PASSWORD: ${MYSQL_PASSWORD:?Generate .env.server first}
+      SPRING_DATASOURCE_HIKARI_MAXIMUM_POOL_SIZE: 10
+      SPRING_DATASOURCE_HIKARI_MINIMUM_IDLE: 2
+      SPRING_DATA_REDIS_HOST: redis
+      RABBITMQ_HOST: rabbitmq
+      RABBITMQ_USERNAME: campus
+      RABBITMQ_PASSWORD: ${RABBITMQ_PASSWORD:?Generate .env.server first}
+      JWT_SECRET: ${JWT_SECRET:?Generate .env.server first}
+    logging: *logs
+    depends_on:
+      mysql: {condition: service_healthy}
+      redis: {condition: service_healthy}
+      rabbitmq: {condition: service_healthy}
+  gateway:
+    image: nginx:1.27-alpine
+    restart: unless-stopped
+    mem_limit: 64m
+    ports: ['${HTTP_BIND:-127.0.0.1}:${HTTP_PORT:-8088}:80']
+    volumes: [./docker/nginx/server.conf:/etc/nginx/conf.d/default.conf:ro]
+    depends_on: [app]
+    logging: *logs
+volumes:
+  mysql_data:
+  rabbitmq_data:
