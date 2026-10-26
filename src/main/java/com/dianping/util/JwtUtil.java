@@ -2,6 +2,7 @@ package com.dianping.util;
 
 import io.jsonwebtoken.Claims;
 import io.jsonwebtoken.Jwts;
+import io.jsonwebtoken.JwtParser;
 import io.jsonwebtoken.security.Keys;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
@@ -17,6 +18,7 @@ public class JwtUtil {
             24 * 60 * 60 * 1000L;
 
     private final SecretKey secretKey;
+    private final JwtParser parser;
 
     public JwtUtil(
             @Value("${jwt.secret}")
@@ -28,6 +30,8 @@ public class JwtUtil {
                                 StandardCharsets.UTF_8
                         )
                 );
+        // JwtParser is immutable/thread-safe; resolve JSON providers once at startup.
+        this.parser = Jwts.parser().verifyWith(secretKey).build();
     }
 
     public String generateToken(
@@ -68,10 +72,7 @@ public class JwtUtil {
     public Claims parseToken(
             String token) {
 
-        return Jwts.parser()
-                .verifyWith(secretKey)
-                .build()
-                .parseSignedClaims(token)
+        return parser.parseSignedClaims(token)
                 .getPayload();
     }
 }

@@ -65,7 +65,9 @@ public class LoginInterceptor implements HandlerInterceptor {
 
             return true;
 
-        } catch (Exception e) {
+        } catch (io.jsonwebtoken.JwtException | IllegalArgumentException e) {
+            // Do not log the token or exception message (which can contain claims).
+            log.debug("JWT rejected: {}", e.getClass().getSimpleName());
             response.setStatus(401);
             response.setContentType("application/json;charset=UTF-8");
             response.getWriter().write("""

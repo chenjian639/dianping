@@ -9,6 +9,18 @@ import static org.mockito.Mockito.*;
 import static org.junit.jupiter.api.Assertions.*;
 
 class LoginInterceptorTest {
+    @Test void malformedTokenGets401ButInternalFailureIsNotDisguisedAs401() throws Exception {
+        JwtUtil jwt = mock(JwtUtil.class);
+        var request = new MockHttpServletRequest("GET","/orders");
+        request.addHeader("Authorization","Bearer test");
+        when(jwt.parseToken("test")).thenThrow(new io.jsonwebtoken.MalformedJwtException("invalid"));
+        var response = new MockHttpServletResponse();
+        assertFalse(new LoginInterceptor(jwt).preHandle(request,response,new Object()));
+        assertEquals(401,response.getStatus());
+        doThrow(new java.util.NoSuchElementException()).when(jwt).parseToken("test");
+        assertThrows(java.util.NoSuchElementException.class,
+                () -> new LoginInterceptor(jwt).preHandle(request,new MockHttpServletResponse(),new Object()));
+    }
     @Test void adminEndpointsRejectOrdinaryUser() throws Exception {
         JwtUtil jwt = mock(JwtUtil.class);
         Claims claims = mock(Claims.class);

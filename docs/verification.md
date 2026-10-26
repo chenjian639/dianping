@@ -1,5 +1,17 @@
 # 本地验证记录
 
+## 2026-10-26：CI 冷启动并发 JWT 修复
+
+CI 40260329229 在首次跨实例并发下单时返回 401，部署 job 被跳过，服务器没有通过该次工作流更新。原拦截器捕获所有 Exception，导致内部错误被误报为 token 无效。
+
+使用旧版 JJWT 0.12.3 的临时诊断测试，反复清空服务发现缓存并并发验签，复现 `NoSuchElementException → ServiceLoader → Services.loadFirst → DefaultJwtParserBuilder.build → JwtUtil.parseToken`。对应上游 [JJWT #873](https://github.com/jwtk/jjwt/issues/873)，官方在 [0.12.4](https://github.com/jwtk/jjwt/releases/tag/0.12.4) 修复该线程安全问题。临时诊断代码依赖内部 API，复现后已移除。
+
+本次升级为 0.12.6，解析器在组件创建时初始化并复用；拦截器仅捕获凭证相关异常，内部错误不再变成 401。不改密钥、不重试鉴权失败、不放宽验签。
+
+新增回归验证32线程共3200次用户验签，以及3200次商家签发/跨实例验签；错误密钥、篡改、过期token仍被拒绝。冒烟保留app2首次鉴权并发场景，错误包含目标实例，只有明确的400时段已满才作为预期拒绝。
+
+使用CI默认测试密钥重建本地双实例后，完整业务冒烟通过；mvn -B verify 通过16项单元测试和11项真实MySQL集成测试，无失败、无跳过。远端CI/CD结果另行检查，不能把本地通过等同于服务器发布成功。
+
 日期：2026-10-25（Asia/Shanghai）。环境：Windows、Java 21、Docker Desktop / Engine 29.1.2。
 
 ## 自动化验证

@@ -12,6 +12,13 @@ import urllib.request
 import uuid
 
 BASES = ['http://127.0.0.1:18081', 'http://127.0.0.1:18082']
+
+class ApiError(AssertionError):
+    def __init__(self, base, method, path, result):
+        self.code = result.get('code')
+        self.message = result.get('msg', '')
+        super().__init__((base, method, path, result))
+
 def api(method, path, body=None, token=None, base=BASES[0], expected=0):
     headers = {'Content-Type': 'application/json'}
     if token: headers['Authorization'] = 'Bearer ' + token
@@ -20,7 +27,8 @@ def api(method, path, body=None, token=None, base=BASES[0], expected=0):
         with urllib.request.urlopen(req, timeout=15) as response: result = json.load(response)
     except urllib.error.HTTPError as e:
         result = json.load(e)
-    assert result['code'] == expected, (method, path, result)
+    if result['code'] != expected:
+        raise ApiError(base, method, path, result)
     return result['data']
 
 def sql(statement):
@@ -65,9 +73,11 @@ def run():
     for token in tokens[1:]: api('POST','/cart/items',dict(dishId=dish,quantity=1),token)
     def reserve(i):
         # A full slot is an expected business rejection; unexpected errors fail the smoke test.
+        # Keep app2's first authenticated traffic concurrent to catch cold-start JWT races.
         try: return i,api('POST','/orders/create',dict(requestId=prefix+str(i),pickupSlotId=slot),tokens[i],BASES[i%2])
-        except AssertionError as e:
-            assert '时段' in str(e), str(e)
+        except ApiError as e:
+            if e.code != 400 or e.message != '时段不属于该档口、已满或已截止预约':
+                raise
             return i,None
     with concurrent.futures.ThreadPoolExecutor(max_workers=24) as pool:
         successes=[(i,order) for i,order in pool.map(reserve,range(1,32)) if order is not None]
