@@ -23,7 +23,7 @@
 
 ## 本地运行与双实例
 
-需要 JDK 21、Maven 3.9+、Docker Compose、Python 3。推荐使用独立的校园测试环境，不影响旧 Compose 数据卷：
+需要 JDK 21、Maven 3.9+、Docker Compose、Python 3。使用独立的双实例测试环境：
 
 ```powershell
 docker compose -f compose.campus.yml up -d --build
@@ -38,7 +38,7 @@ python scripts/smoke_campus.py
 - `compose.campus.yml` 中的默认凭据仅用于本地。已有 `.env` 的同名变量会覆盖默认值。
 - 停止保留数据：`docker compose -f compose.campus.yml down`。不要对有价值的数据卷使用 `down -v`。
 
-单实例旧入口仍可用：复制 `.env.example` 到 `.env`、使数据库应用密码与实际账号一致，再运行 `docker compose up -d --build`。该环境会初始化原有种子数据并执行 V2 迁移。当前 Compose 已包含 RabbitMQ。
+部署配置仅保留两套：本地/CI 用 `compose.campus.yml`，服务器用 `compose.server.yml`。所有命令显式传 `-f`；旧 `docker-compose.yml` 和 `.env.example` 已移除，已有数据卷与本地 `.env` 不会被删除。单实例运行和密码初始化见 [服务器部署指南](docs/server-deployment.md)。
 
 ## 主要 API
 
@@ -92,9 +92,11 @@ python scripts/smoke_campus.py # 已启动的校园双实例环境端到端测�
 
 GitHub Actions 对 main/master 推送与 PR 执行 `clean verify`、构建运行双实例 Docker、执行 API/缓存广播冒烟，保存测试报告和 JAR。
 
-CD 为 workflow_dispatch 手动触发，仅 master 可部署，需勾选已备份数据库，并配置 production 环境的 `ECS_HOST`、`ECS_USER`、`ECS_SSH_KEY`、`ECS_KNOWN_HOSTS`。已核实主机公钥后填写 known_hosts。沿用旧服务器目录 `/home/dodo/projects/dianping/target` 与 systemd 服务 `dianping`；服务环境须提供 MySQL、Redis、RabbitMQ、JWT 配置，运行 Java 21，允许部署账号重启该服务。部署检查 readiness，失败尝试恢复旧 JAR并重新检查；数据库不自动回滚。首次部署尚无旧 JAR 时需要手工完成服务初始化。
+CI/CD 只有 `.github/workflows/campus.yml` 一个入口：默认分支 push 在 CI 通过后自动部署，手动运行勾选 deploy 才部署。SSH 使用四个 `SERVER_*` Secrets，首次手工部署后，后续由 `scripts/deploy_server.sh` 自动备份并更新 app/gateway。服务器目录统一为登录用户的 `~/campus-pickup`，健康检查在网关容器内部执行，不依赖宿主端口。Dockerfile 默认从源码构建，`--target runtime` 直接打包 CI 验证过的 JAR。详细参数见 [配置索引](docs/configuration-map.md)，首次安装见 [服务器部署指南](docs/server-deployment.md)。
 
 ## 是否需要阿里云
+
+已有 Ubuntu 4 核 4GB 服务器时，使用独立的 [服务器部署指南](docs/server-deployment.md) 和 `compose.server.yml`，先部署单实例。服务器环境与 GitHub CD 的关键配置见 [配置索引](docs/configuration-map.md)。
 
 当前不必购买云服务器。单机 Docker 中两个独立 JVM 足以验证数据库竞争、跨实例幂等、缓存广播和负载均衡；本项目提供现成环境。
 

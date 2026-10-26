@@ -11,9 +11,17 @@
 - [x] 取消/超时原子释放库存与名额，重复处理无副作用。
 - [x] 多实例 Caffeine 失效广播；管理端权限；公开健康探针。
 - [x] Flyway 新库/旧库迁移、Docker 双实例与 Nginx。
-- [x] 单元测试、MySQL 集成并发测试、CI、手动 CD 与操作文档对齐。
+- [x] 单元测试、MySQL 集成并发测试、CI/CD 与操作文档对齐。
 
 验证结果见 [docs/verification.md](docs/verification.md)。CI/CD 工作流已配置，本次未推送或触发远端部署。
+
+## 配置整理（2026-10-26）
+
+- [x] 删除旧默认 Compose、旧环境示例和重复 SSH 检查工作流。
+- [x] 保留服务器单实例和本地/CI双实例两个明确入口。
+- [x] 部署步骤集中到 scripts/deploy_server.sh；Dockerfile统一源码与JAR两种构建目标。
+- [x] 服务器目录使用登录用户HOME；网关内部探针不依赖宿主端口。
+- [x] 文档、忽略规则和CI校验同步更新。
 
 ## 后续迭代（不作为已实现能力宣传）
 

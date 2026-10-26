@@ -10,6 +10,7 @@ target/
 
 # Environment variables
 .env
+.env.server
 
 # Logs
 *.log

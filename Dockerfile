@@ -10,12 +10,18 @@ RUN --mount=type=cache,target=/root/.m2 mvn -B -q dependency:go-offline
 COPY src ./src
 RUN --mount=type=cache,target=/root/.m2 mvn -B -q clean package -DskipTests
 
-FROM eclipse-temurin:21-jre
+FROM eclipse-temurin:21-jre AS runtime-base
 
 WORKDIR /app
-
-COPY --from=build /build/target/dianping-0.0.1-SNAPSHOT.jar app.jar
 
 EXPOSE 8080
 
 ENTRYPOINT ["java", "-jar", "app.jar"]
+
+# CI 已验证的 JAR：服务器只打包运行环境，不重新编译。
+FROM runtime-base AS runtime
+COPY target/dianping-0.0.1-SNAPSHOT.jar app.jar
+
+# 默认入口：本地和首次部署直接从源码构建。
+FROM runtime-base AS source-runtime
+COPY --from=build /build/target/dianping-0.0.1-SNAPSHOT.jar app.jar

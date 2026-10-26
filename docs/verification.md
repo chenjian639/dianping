@@ -33,3 +33,13 @@
 旧 Spring Boot BOM 管理的 Testcontainers 1.18.x 无法连接本机 Docker 29，已覆盖为 1.21.4；依照 [Testcontainers 官方发布记录](https://github.com/testcontainers/testcontainers-java/releases/tag/1.21.4)。Flyway 补齐 MySQL 数据库模块，Resilience4j 注解补齐 Spring AOP。
 
 CI 使用相同测试与 Compose 冒烟命令。CD 尚未在远端执行，生产的 systemd、SSH、数据库备份与回滚需按 README 配置后手动触发。本次没有连接或更改原云端服务。
+
+
+## 2026-10-26 配置精简验证
+
+- 删除旧默认Compose和独立SSH检查工作流；两套现用Compose配置解析通过。
+- YAML解析及全部工作流shell、deploy_server.sh的bash -n通过。
+- Dockerfile默认源码构建、--target runtime构建均通过；两种镜像内均存在/app/app.jar和Java。
+- 本地网关容器内部wget请求readiness返回UP，验证探针不依赖宿主发布端口。
+- 未修改Java业务代码，本次未重新运行JUnit；没有连接服务器或触发远端发布。
+- 当前配置入口以configuration-map.md和README为准，上面的2026-10-25部署说明是历史记录。
