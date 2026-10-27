@@ -48,7 +48,7 @@ sudo docker compose --env-file .env.server -f compose.server.yml up -d --build
 
 生成脚本会产生随机密码和 JWT 密钥，权限为 600；若 `.env.server` 已存在则拒绝覆盖。升级时必须保留这份文件和数据卷：修改环境密码不会自动修改数据库中已有账号密码。
 
-Flyway 自动建立 V1、V2 表，不需要手工执行旧 schema.sql。默认空库无商家/菜品演示数据，普通注册也不会授予商家角色。商家账号与档口的初始化应在私有数据库内完成；本地双实例 smoke 脚本不适用于这个服务器环境。
+Flyway 自动执行 V1、V2、V3 迁移，不需要手工执行旧 schema.sql。默认空库无商家/菜品演示数据，普通注册也不会授予商家角色。商家账号与档口的初始化应在私有数据库内完成；本地双实例 smoke 脚本不适用于这个服务器环境。
 
 ## 3. 验证启动
 
@@ -93,7 +93,7 @@ sudo docker compose --env-file .env.server -f compose.server.yml up -d --build
 curl -f http://127.0.0.1:8088/actuator/health/readiness
 ```
 
-应用回退可将 previous 重新标记为 server，然后 `up -d --no-build --force-recreate app`；数据库迁移不会自动回退，先核对兼容性。40GB 磁盘需定期检查 `df -h`、`docker system df` 和备份目录。停止保留数据用 `compose stop`，不要使用 `down -v` 删除数据。
+V3 新增精确评分总分，旧版写入逻辑不会维护该字段；不要混跑新旧评分版本，回退旧版需同时恢复备份或重建一致的统计。应用回退可将 previous 重新标记为 server，然后 `up -d --no-build --force-recreate app`；数据库迁移不会自动回退，先核对兼容性。40GB 磁盘需定期检查 `df -h`、`docker system df` 和备份目录。停止保留数据用 `compose stop`，不要使用 `down -v` 删除数据。
 
 GitHub CI/CD 只有 campus.yml 一个入口：默认分支push通过CI后自动部署，手动运行勾选deploy才部署。独立SSH检查工作流已合并进实际发布流程。服务器目录使用登录用户的HOME，不再写死ubuntu账号。
 

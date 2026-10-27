@@ -1,5 +1,7 @@
 package com.dianping.service;
 
+import com.dianping.vo.OrderSummaryVO;
+
 import com.dianping.common.PageResult;
 import com.dianping.entity.*;
 import com.dianping.enums.OrderStatus;
@@ -8,7 +10,6 @@ import com.dianping.mapper.*;
 import com.dianping.vo.CartItemVO;
 import com.dianping.vo.OrderDetailVO;
 import lombok.extern.slf4j.Slf4j;
-import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.dao.DuplicateKeyException;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -18,50 +19,22 @@ import java.util.*;
 
 @Slf4j
 @Service
+@lombok.RequiredArgsConstructor
 public class OrderService {
 
-    @Autowired
-    private CartItemMapper cartItemMapper;
+    private final CartItemMapper cartItemMapper;
 
-    @Autowired
-    private DishMapper dishMapper;
+    private final DishMapper dishMapper;
 
-    @Autowired
-    private OrderMapper orderMapper;
+    private final OrderMapper orderMapper;
 
-    @Autowired
-    private PickupSlotMapper pickupSlotMapper;
+    private final UserMapper userMapper;
 
-    @Autowired
-    private OrderItemMapper orderItemMapper;
+    private final PickupSlotMapper pickupSlotMapper;
 
-    @Autowired
-    private OutboxEventMapper outboxEventMapper;
+    private final OrderItemMapper orderItemMapper;
 
-    private void createOrderTimeoutEvent(
-            Long orderId) {
-
-        OutboxEvent event = new OutboxEvent();
-
-        event.setEventId(
-                UUID.randomUUID().toString()
-        );
-
-        event.setEventType(
-                "ORDER_TIMEOUT_CHECK"
-        );
-
-        event.setAggregateId(orderId);
-
-        event.setPayload(
-                String.valueOf(orderId)
-        );
-
-        event.setStatus("PENDING");
-        event.setRetryCount(0);
-
-        outboxEventMapper.insert(event);
-    }
+    private final OutboxEventService outboxEventService;
 
     @Transactional
     public Long createOrder(
@@ -75,7 +48,7 @@ public class OrderService {
         }
 
         // 同一用户的下单串行化，避免不同请求重复购买同一份购物车。
-        if (orderMapper.lockUser(userId) == null) throw new BusinessException("用户不存在");
+        if (userMapper.lockUser(userId) == null) throw new BusinessException("用户不存在");
         // 1. 已经成功创建过，直接返回
         Order existing =
                 orderMapper.selectByUserIdAndRequestId(
@@ -223,14 +196,12 @@ public class OrderService {
 
         // 7. 清购物车
         cartItemMapper.deleteByUserId(userId);
-        createOrderTimeoutEvent(
-                order.getId()
-        );
+        outboxEventService.orderTimeout(order.getId());
 
         return order.getId();
     }
 
-    public PageResult<Order> getOrders(
+    public PageResult<OrderSummaryVO> getOrders(
             Long userId,
             Integer page,
             Integer pageSize) {
@@ -246,10 +217,10 @@ public class OrderService {
 
         Long total = orderMapper.countByUserId(userId);
 
-        PageResult<Order> result = new PageResult<>();
+        PageResult<OrderSummaryVO> result = new PageResult<>();
 
         result.setTotal(total);
-        result.setRecords(records);
+        result.setRecords(records.stream().map(OrderSummaryVO::from).toList());
 
         return result;
     }
@@ -314,18 +285,7 @@ public class OrderService {
             throw new BusinessException("订单不存在或当前状态无法取消");
         }
 
-        releaseSlot(orderId);
-
-        // 2. 查询这个订单买了哪些菜
-        List<OrderItem> items =
-                orderItemMapper.selectByOrderId(orderId);
-
-        // 3. 把每个菜的库存加回来
-        items.sort(Comparator.comparing(OrderItem::getDishId));
-        for (OrderItem item : items) {
-            if (dishMapper.increaseStock(item.getDishId(), item.getQuantity()) == 0)
-                throw new BusinessException("恢复库存失败");
-        }
+        releaseResources(orderId);
         log.info(
                 "订单取消成功, orderId={}, userId={}",
                 orderId,
@@ -366,6 +326,16 @@ public class OrderService {
             throw new BusinessException("取餐码错误、订单不属于该档口或订单非待取餐状态");
     }
 
+    private void releaseResources(Long orderId) {
+        releaseSlot(orderId);
+        List<OrderItem> items = orderItemMapper.selectByOrderId(orderId);
+        items.sort(Comparator.comparing(OrderItem::getDishId));
+        for (OrderItem item : items) {
+            if (dishMapper.increaseStock(item.getDishId(), item.getQuantity()) != 1)
+                throw new BusinessException("恢复库存失败, dishId=" + item.getDishId());
+        }
+    }
+
     private void releaseSlot(Long orderId) {
         Order order = orderMapper.selectById(orderId);
         // 旧订单没有预约时段，仍允许取消。
@@ -373,7 +343,7 @@ public class OrderService {
             throw new BusinessException("时段名额释放失败");
     }
 
-    public PageResult<Order> getMerchantOrders(
+    public PageResult<OrderSummaryVO> getMerchantOrders(
             Long restaurantId,
             Integer page,
             Integer pageSize,
@@ -395,9 +365,9 @@ public class OrderService {
                         status
                 );
 
-        PageResult<Order> result = new PageResult<>();
+        PageResult<OrderSummaryVO> result = new PageResult<>();
         result.setTotal(total);
-        result.setRecords(records);
+        result.setRecords(records.stream().map(OrderSummaryVO::from).toList());
 
         return result;
     }
@@ -457,28 +427,7 @@ public class OrderService {
             return;
         }
 
-        releaseSlot(orderId);
-        // 只有真正从待支付 -> 已取消的那个线程
-        // 才允许恢复库存
-        List<OrderItem> items =
-                orderItemMapper.selectByOrderId(orderId);
-
-        items.sort(Comparator.comparing(OrderItem::getDishId));
-        for (OrderItem item : items) {
-
-            int affected =
-                    dishMapper.increaseStock(
-                            item.getDishId(),
-                            item.getQuantity()
-                    );
-
-            if (affected == 0) {
-                throw new BusinessException(
-                        "恢复库存失败, dishId=" +
-                                item.getDishId()
-                );
-            }
-        }
+        releaseResources(orderId);
 
         log.info(
                 "订单超时取消成功并恢复库存, orderId={}",

@@ -1,25 +1,24 @@
 package com.dianping.controller;
 
+import com.dianping.vo.OrderSummaryVO;
+
 import com.dianping.common.PageResult;
 import com.dianping.common.Result;
 import com.dianping.dto.CreateOrderDTO;
-import com.dianping.entity.Order;
 import com.dianping.service.OrderService;
 import com.dianping.vo.OrderDetailVO;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.servlet.http.HttpServletRequest;
-import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.web.bind.annotation.*;
 
-import java.util.List;
 
 @Tag(name = "订单接口")
 @RestController
+@lombok.RequiredArgsConstructor
 @RequestMapping("/orders")
 public class OrderController {
 
-    @Autowired
-    private OrderService orderService;
+    private final OrderService orderService;
 
     @PostMapping("/create")
     public Result<Long> createOrder(
@@ -39,7 +38,7 @@ public class OrderController {
     }
 
     @GetMapping
-    public Result<PageResult<Order>> getOrders(
+    public Result<PageResult<OrderSummaryVO>> getOrders(
             @RequestAttribute("userId") Long userId,
             @RequestParam(defaultValue = "1") Integer page,
             @RequestParam(defaultValue = "10") Integer pageSize) {

@@ -9,14 +9,13 @@ import com.dianping.vo.LoginVO;
 import com.dianping.vo.UserVO;
 import io.jsonwebtoken.Claims;
 import jakarta.validation.Valid;
-import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.web.bind.annotation.*;
 
 @RestController
+@lombok.RequiredArgsConstructor
 @RequestMapping("/users")
 public class UserController {
-    @Autowired
-    private UserService userService;
+    private final UserService userService;
 
     @GetMapping("/{id}")
     public Result<UserVO> getUserById(@PathVariable Long id, @RequestAttribute("userId") Long userId) {

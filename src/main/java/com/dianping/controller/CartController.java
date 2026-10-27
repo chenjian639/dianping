@@ -6,17 +6,16 @@ import com.dianping.dto.UpdateCartItemDTO;
 import com.dianping.service.CartService;
 import com.dianping.vo.CartItemVO;
 import jakarta.validation.Valid;
-import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.web.bind.annotation.*;
 
 import java.util.List;
 
 @RestController
+@lombok.RequiredArgsConstructor
 @RequestMapping("/cart")
 public class CartController {
 
-    @Autowired
-    private CartService cartService;
+    private final CartService cartService;
 
     @PostMapping("/items")
     public Result<Void> addItem(
@@ -44,7 +43,7 @@ public class CartController {
         cartService.updateQuantity(
                 userId,
                 id,
-                dto.getQuantity()
+                dto
         );
 
         return Result.success(null);

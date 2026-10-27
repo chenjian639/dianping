@@ -29,7 +29,11 @@ class CampusOrderIT {
     @SpringBootConfiguration
     @EnableAutoConfiguration(exclude = org.springframework.boot.autoconfigure.security.servlet.SecurityAutoConfiguration.class)
     @MapperScan("com.dianping.mapper")
-    @Import(OrderService.class)
+    @Import({OrderService.class, OutboxEventService.class, RestaurantService.class,
+            RestaurantDatabaseService.class, ReviewService.class, RestaurantLocalCacheService.class,
+            com.dianping.config.LocalCacheConfig.class,
+            com.dianping.listener.RestaurantLocalCacheInvalidationListener.class,
+            CartService.class, PickupSlotService.class})
     static class Config {}
 
     @Container static MySQLContainer<?> mysql = new MySQLContainer<>("mysql:8.0")
@@ -42,11 +46,19 @@ class CampusOrderIT {
         r.add("spring.rabbitmq.username", () -> "test");
         r.add("spring.rabbitmq.password", () -> "test");
     }
+    @org.springframework.boot.test.mock.mockito.MockBean RestaurantCacheService redis;
+    @Autowired RestaurantService restaurants;
+    @Autowired ReviewService reviews;
+    @Autowired CartService carts;
+    @Autowired OutboxEventService events;
+    @Autowired org.springframework.transaction.PlatformTransactionManager transactions;
+    @Autowired com.github.benmanes.caffeine.cache.Cache<Long,com.dianping.vo.RestaurantDetailVO> cache;
     @Autowired OrderService service;
     @Autowired OrderMapper orders;
     @Autowired JdbcTemplate db;
 
     @BeforeEach void seed() {
+        cache.invalidateAll();
         for (String table : List.of("review", "order_item", "orders", "outbox_event", "cart_item", "pickup_slot", "dish", "user", "restaurant"))
             db.update("DELETE FROM " + table);
         db.update("INSERT INTO restaurant(id,name,status) VALUES(1,'Campus canteen',1),(2,'Other canteen',1)");
@@ -181,6 +193,88 @@ class CampusOrderIT {
         assertEquals(99, number("SELECT stock FROM dish WHERE id=1"));
     }
 
+    @Test void restaurantCacheInvalidationOccursOnlyAfterCommit() {
+        var cached = new com.dianping.vo.RestaurantDetailVO();
+        cached.setId(1L);
+        cached.setStatus(1);
+        cache.put(1L,cached);
+        var tx = new org.springframework.transaction.support.TransactionTemplate(transactions);
+        tx.executeWithoutResult(status -> {
+            restaurants.updateRestaurantStatus(1L,0);
+            assertSame(cached,cache.getIfPresent(1L), "Do not evict before the business commit");
+            status.setRollbackOnly();
+        });
+        assertEquals(1,number("SELECT status FROM restaurant WHERE id=1"));
+        assertEquals(0,number("SELECT COUNT(*) FROM outbox_event"));
+        assertSame(cached,cache.getIfPresent(1L));
+        restaurants.updateRestaurantStatus(1L,0);
+        assertNull(cache.getIfPresent(1L));
+        assertEquals(1,number("SELECT COUNT(*) FROM outbox_event WHERE event_type='RESTAURANT_CACHE_EVICT'"));
+    }
+
+    @Test void outboxInsertFailureRollsBackRestaurantAndReviewChanges() {
+        Long order = service.createOrder(1L,"review-rollback",1L);
+        db.update("UPDATE orders SET status=4 WHERE id=?",order);
+        var cached = new com.dianping.vo.RestaurantDetailVO();
+        cache.put(1L,cached);
+        db.execute("ALTER TABLE outbox_event ADD CONSTRAINT test_reject_outbox CHECK (event_type <> 'RESTAURANT_CACHE_EVICT')");
+        try {
+            assertThrows(org.springframework.dao.DataAccessException.class, () -> restaurants.updateRestaurantStatus(1L,0));
+            assertEquals(1,number("SELECT status FROM restaurant WHERE id=1"));
+            var dto = new com.dianping.dto.CreateReviewDTO();
+            dto.setOrderId(order); dto.setRating(5); dto.setContent("test");
+            assertThrows(org.springframework.dao.DataAccessException.class, () -> reviews.createReview(1L,dto));
+            assertEquals(0,number("SELECT COUNT(*) FROM review"));
+            assertEquals(0,number("SELECT rating_sum FROM restaurant WHERE id=1"));
+            assertEquals(0,number("SELECT review_count FROM restaurant WHERE id=1"));
+            assertSame(cached,cache.getIfPresent(1L));
+            org.mockito.Mockito.verifyNoInteractions(redis);
+        } finally { db.execute("ALTER TABLE outbox_event DROP CHECK test_reject_outbox"); }
+    }
+
+    @Test void ratingsUseExactTotalsAndAllQueriesAgree() {
+        int[] ratings = {1,1,2,1};
+        for (int i=0; i<ratings.length; i++) {
+            long user=i+1;
+            Long order=service.createOrder(user,"rating-"+i,1L);
+            db.update("UPDATE orders SET status=4 WHERE id=?",order);
+            var cached=new com.dianping.vo.RestaurantDetailVO();
+            cache.put(1L,cached);
+            var dto=new com.dianping.dto.CreateReviewDTO();
+            dto.setOrderId(order); dto.setRating(ratings[i]); dto.setContent("test");
+            reviews.createReview(user,dto);
+            assertNull(cache.getIfPresent(1L));
+        }
+        org.mockito.Mockito.verifyNoInteractions(redis);
+        assertEquals(5,number("SELECT rating_sum FROM restaurant WHERE id=1"));
+        assertEquals(4,number("SELECT review_count FROM restaurant WHERE id=1"));
+        var expected=new java.math.BigDecimal("1.3");
+        assertEquals(expected,reviews.getRestaurantReviewSummary(1L).getAverageRating());
+        assertEquals(expected,restaurants.getRestaurantDetail(1L).getAverageRating());
+        assertEquals(expected,restaurants.searchRestaurants("","rating",1,10).getRecords().get(0).getAverageRating());
+        assertEquals(4,number("SELECT COUNT(*) FROM outbox_event WHERE event_type='RESTAURANT_CACHE_EVICT'"));
+    }
+
+    @Test void cartUpdatesUseOneValidatedBusinessEntry() {
+        Long item=db.queryForObject("SELECT id FROM cart_item WHERE user_id=1",Long.class);
+        var dto=new com.dianping.dto.UpdateCartItemDTO();
+        dto.setQuantity(101);
+        assertThrows(BusinessException.class, () -> carts.updateQuantity(1L,item,dto));
+        dto.setQuantity(2);
+        db.update("UPDATE dish SET status=0 WHERE id=1");
+        assertThrows(BusinessException.class, () -> carts.updateQuantity(1L,item,dto));
+        db.update("UPDATE dish SET status=1 WHERE id=1");
+        carts.updateQuantity(1L,item,dto);
+        assertEquals(2,number("SELECT quantity FROM cart_item WHERE id="+item));
+        assertThrows(BusinessException.class, () -> carts.updateQuantity(2L,item,dto));
+    }
+
+    @Test void outboxRecorderRequiresABusinessTransaction() {
+        assertThrows(org.springframework.transaction.IllegalTransactionStateException.class,
+                () -> events.restaurantChanged(1L));
+        assertEquals(0,number("SELECT COUNT(*) FROM outbox_event"));
+    }
+
     @Test void existingLegacyDatabaseIsBaselinedAndOrderHistoryIsPreserved() {
         // Only the disposable Testcontainers database. Simulate the previous release with no Flyway history.
         var legacy = org.flywaydb.core.Flyway.configure()
@@ -191,11 +285,19 @@ class CampusOrderIT {
         db.update("INSERT INTO user(id,username,password) VALUES(1,'legacy','test')");
         db.update("INSERT INTO restaurant(id,name) VALUES(1,'Legacy canteen')");
         db.update("INSERT INTO orders(id,user_id,restaurant_id,total_amount,status,request_id) VALUES(1,1,1,12,0,'legacy-order')");
+        int[] legacyRatings={1,1,2,1};
+        for(int i=0;i<legacyRatings.length;i++) {
+            db.update("INSERT INTO orders(id,user_id,restaurant_id,total_amount,status,request_id) VALUES(?,1,1,12,4,?)",i+2,"legacy-review-"+i);
+            db.update("INSERT INTO review(user_id,restaurant_id,order_id,rating) VALUES(1,1,?,?)",i+2,legacyRatings[i]);
+        }
+        db.update("UPDATE restaurant SET average_rating=1.2,review_count=4 WHERE id=1");
         db.execute("DROP TABLE flyway_schema_history");
         var upgraded = org.flywaydb.core.Flyway.configure()
                 .dataSource(mysql.getJdbcUrl(),mysql.getUsername(),mysql.getPassword())
                 .baselineOnMigrate(true).baselineVersion("1").load();
         upgraded.migrate();
+        assertEquals(5,number("SELECT rating_sum FROM restaurant WHERE id=1"));
+        assertEquals(new java.math.BigDecimal("1.3"),db.queryForObject("SELECT average_rating FROM restaurant WHERE id=1",java.math.BigDecimal.class));
         Order old = orders.selectById(1L);
         assertEquals("legacy-order",old.getRequestId());
         assertNull(old.getPickupSlotId());

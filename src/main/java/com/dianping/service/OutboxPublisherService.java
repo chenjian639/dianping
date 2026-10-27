@@ -6,7 +6,6 @@ import com.dianping.mapper.OutboxEventMapper;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.amqp.rabbit.connection.CorrelationData;
 import org.springframework.amqp.rabbit.core.RabbitTemplate;
-import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
 
 import java.util.List;
@@ -18,11 +17,6 @@ public class OutboxPublisherService {
 
     private final OutboxEventMapper outboxEventMapper;
     private final RabbitTemplate rabbitTemplate;
-
-    @Scheduled(fixedDelay = 5000)
-    public void publishPendingScheduled() {
-        publishPending();
-    }
 
     public OutboxPublisherService(
             OutboxEventMapper outboxEventMapper,
@@ -50,7 +44,7 @@ public class OutboxPublisherService {
             }
 
             log.info(
-                    "Outbox抢占成功, eventId={}, port={}",
+                    "Outbox抢占成功, eventId={}",
                     event.getEventId()
             );
 
@@ -146,7 +140,6 @@ public class OutboxPublisherService {
         }
     }
 
-    @Scheduled(fixedDelay = 30000)
     public void recoverStuckEvents() {
 
         int recovered =

@@ -42,3 +42,5 @@ Dockerfile 是唯一镜像构建定义：默认源码构建；--target runtime �
 发布先备份项目与数据库，再构建镜像；保留 previous 镜像，仅更新app/gateway。失败报告并保留备份，没有自动回滚；数据库不会自动回退。同步不会删除服务器独有文件，也不会覆盖.env/.env.*。旧备份、上传包、发布镜像仍需安排保留策略。
 
 服务器密码初始化用 python3 scripts/init_server_env.py；已有环境不要覆盖或重新生成。修改环境文件不会自动改变已有数据库账号密码。操作命令见 [部署指南](server-deployment.md)。
+
+应用内部的角色授权集中在SecurityConfig，调度分离集中在SchedulingConfig，不分散到Compose或控制器重复配置。V3评分迁移与错误HTTP状态变化见README，自动部署仍执行相同的CI验证与备份步骤。

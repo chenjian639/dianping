@@ -6,8 +6,6 @@ import org.apache.ibatis.annotations.*;
 import java.util.List;
 @Mapper
 public interface OrderMapper {
-    @Select("SELECT id FROM user WHERE id = #{userId} FOR UPDATE")
-    Long lockUser(Long userId);
     @Select("SELECT * FROM orders WHERE id = #{id}")
     Order selectById(Long id);
     @Update("UPDATE orders SET status = 4 WHERE id = #{id} AND restaurant_id = #{restaurantId} AND status = 3 AND pickup_code = #{code}")

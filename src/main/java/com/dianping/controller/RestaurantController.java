@@ -13,7 +13,6 @@ import com.dianping.vo.RestaurantSearchVO;
 import com.dianping.vo.ReviewVO;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
-import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.web.bind.annotation.*;
 
 import java.util.List;
@@ -23,15 +22,13 @@ import java.util.List;
         description = "餐厅查询、搜索、评价等公共接口"
 )
 @RestController
+@lombok.RequiredArgsConstructor
 @RequestMapping("/restaurants")
 public class RestaurantController {
 
-    @Autowired
-    private RestaurantService restaurantService;
-    @Autowired
-    private DishService dishService;
-    @Autowired
-    private ReviewService reviewService;
+    private final RestaurantService restaurantService;
+    private final DishService dishService;
+    private final ReviewService reviewService;
     @GetMapping
     public Result<List<Restaurant>> list() {
         return Result.success(restaurantService.findAll());

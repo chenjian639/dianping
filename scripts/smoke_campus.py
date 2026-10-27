@@ -24,11 +24,15 @@ def api(method, path, body=None, token=None, base=BASES[0], expected=0):
     if token: headers['Authorization'] = 'Bearer ' + token
     req = urllib.request.Request(base+path, data=None if body is None else json.dumps(body).encode(), headers=headers, method=method)
     try:
-        with urllib.request.urlopen(req, timeout=15) as response: result = json.load(response)
+        with urllib.request.urlopen(req, timeout=15) as response:
+            http_status = response.status
+            result = json.load(response)
     except urllib.error.HTTPError as e:
+        http_status = e.code
         result = json.load(e)
     if result['code'] != expected:
         raise ApiError(base, method, path, result)
+    assert http_status == (200 if expected == 0 else expected), (base, path, http_status, result)
     return result['data']
 
 def sql(statement):
@@ -67,6 +71,9 @@ def run():
             phone='1'+str(random.randrange(10**9,10**10))))
         if i==0: sql(f"UPDATE user SET role='MERCHANT',restaurant_id={restaurant} WHERE username='{username}'")
         tokens.append(api('POST','/users/login',dict(username=username,password='CampusSmoke123'))['token'])
+    api('GET','/orders',expected=401)
+    api('GET','/merchant/orders',token=tokens[1],expected=403)
+    api('POST','/orders/create',{},tokens[1],expected=400)
     start = dt.datetime.now(dt.timezone(dt.timedelta(hours=8))).replace(tzinfo=None)+dt.timedelta(hours=2)
     slot = api('POST','/merchant/pickup-slots',dict(startsAt=start.isoformat(timespec='seconds'),
         endsAt=(start+dt.timedelta(minutes=15)).isoformat(timespec='seconds'),capacity=20),tokens[0])
@@ -85,10 +92,13 @@ def run():
     assert int(sql(f'SELECT reserved FROM pickup_slot WHERE id={slot}'))==20
     assert int(sql(f'SELECT stock FROM dish WHERE id={dish}'))==80
     i,order=successes[0]
+    completed_user = i
     api('GET',f'/orders/{order}',token=tokens[0],expected=400)
     # Replay on the other instance must return the same order after the cart was cleared.
     assert api('POST','/orders/create',dict(requestId=prefix+str(i),pickupSlotId=slot),tokens[i],BASES[(i+1)%2])==order
     detail=api('GET',f'/orders/{order}',token=tokens[i])
+    summary=api('GET','/orders',token=tokens[i])['records'][0]
+    assert 'pickupCode' not in summary and 'requestId' not in summary
     assert api('GET',f'/merchant/orders/{order}',token=tokens[0]).get('pickupCode') is None
     api('PUT',f'/orders/{order}/pay',token=tokens[i])
     api('PUT',f'/merchant/orders/{order}/prepare',token=tokens[0])
@@ -109,9 +119,23 @@ def run():
         if names==[changed,changed]: break
         time.sleep(.25)
     else: raise AssertionError('Cache broadcast did not reach both instances within 10s: '+str(names))
+    # Ratings and business status must use the same commit/outbox/broadcast path as metadata.
+    api('POST','/reviews',dict(orderId=order,rating=5,content='Smoke review'),tokens[completed_user])
+    for attempt in range(60):
+        details=[api('GET',f'/restaurants/{restaurant}',token=tokens[0],base=base) for base in BASES]
+        if all(d['averageRating']==5.0 and d['reviewCount']==1 for d in details): break
+        time.sleep(.25)
+    else: raise AssertionError('Review cache invalidation did not reach both instances')
+    api('PUT','/merchant/restaurant/status',dict(status=0),tokens[0])
+    for attempt in range(60):
+        states=[api('GET',f'/restaurants/{restaurant}',token=tokens[0],base=base)['status'] for base in BASES]
+        if states==[0,0]: break
+        time.sleep(.25)
+    else: raise AssertionError('Restaurant status invalidation did not reach both instances')
+    api('PUT','/merchant/restaurant/status',dict(status=1),tokens[0])
     with urllib.request.urlopen('http://127.0.0.1:18080/actuator/health/liveness',timeout=5) as response:
         assert response.headers.get('X-Campus-Upstream')
         assert json.load(response)['status']=='UP'
-    print('PASS: two-instance capacity, stock, idempotency, pickup, cancellation, admin authorization, cache broadcast and gateway')
+    print('PASS: capacity, stock, idempotency, pickup, cancellation, Security/HTTP, list VO, metadata/review/status cache broadcasts and gateway')
 
 if __name__=='__main__': run()

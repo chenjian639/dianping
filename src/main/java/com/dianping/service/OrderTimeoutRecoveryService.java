@@ -3,7 +3,6 @@ package com.dianping.service;
 import com.dianping.enums.OrderStatus;
 import com.dianping.mapper.OrderMapper;
 import lombok.extern.slf4j.Slf4j;
-import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
 
 import java.util.List;
@@ -23,7 +22,6 @@ public class OrderTimeoutRecoveryService {
         this.orderService = orderService;
     }
 
-    @Scheduled(fixedDelay = 60000)
     public void recoverExpiredOrders() {
 
         List<Long> orderIds =

@@ -8,27 +8,24 @@ import com.dianping.exception.BusinessException;
 import com.dianping.mapper.CartItemMapper;
 import com.dianping.mapper.DishMapper;
 import com.dianping.vo.CartItemVO;
-import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
-import com.dianping.mapper.OrderMapper;
+import com.dianping.mapper.UserMapper;
 
 import java.util.List;
 
 @Service
+@lombok.RequiredArgsConstructor
 public class CartService {
-    @Autowired
-    private OrderMapper orderMapper;
+    private final UserMapper userMapper;
 
     private void lockCart(Long userId) {
-        if (orderMapper.lockUser(userId) == null) throw new BusinessException("用户不存在");
+        if (userMapper.lockUser(userId) == null) throw new BusinessException("用户不存在");
     }
 
-    @Autowired
-    private CartItemMapper cartItemMapper;
+    private final CartItemMapper cartItemMapper;
 
-    @Autowired
-    private DishMapper dishMapper;
+    private final DishMapper dishMapper;
 
     @Transactional
     public void addItem(Long userId, AddCartItemDTO dto) {
@@ -97,25 +94,6 @@ public class CartService {
     }
 
     @Transactional
-    public void updateQuantity(
-            Long userId,
-            Long cartItemId,
-            Integer quantity) {
-        lockCart(userId);
-        if (quantity == null || quantity < 1) throw new BusinessException("数量必须大于零");
-
-        int rows = cartItemMapper.updateQuantity(
-                cartItemId,
-                userId,
-                quantity
-        );
-
-        if (rows == 0) {
-            throw new BusinessException("购物车记录不存在");
-        }
-    }
-
-    @Transactional
     public void deleteItem(Long userId, Long cartItemId) {
         lockCart(userId);
 
@@ -130,7 +108,7 @@ public class CartService {
     }
 
     @Transactional
-    public void updateCartItem(
+    public void updateQuantity(
             Long userId,
             Long cartItemId,
             UpdateCartItemDTO dto) {

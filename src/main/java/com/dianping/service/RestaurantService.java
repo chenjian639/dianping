@@ -2,50 +2,31 @@ package com.dianping.service;
 
 import com.dianping.common.PageResult;
 import com.dianping.dto.UpdateRestaurantDTO;
-import com.dianping.entity.OutboxEvent;
 import com.dianping.entity.Restaurant;
-import com.dianping.event.RestaurantChangedEvent;
 import com.dianping.exception.BusinessException;
-import com.dianping.mapper.OutboxEventMapper;
 import com.dianping.mapper.RestaurantMapper;
-import com.dianping.mapper.ReviewMapper;
 import com.dianping.vo.RestaurantDetailVO;
-import com.dianping.vo.RestaurantReviewSummaryVO;
 import com.dianping.vo.RestaurantSearchVO;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.extern.slf4j.Slf4j;
-import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import java.util.List;
-import java.util.UUID;
 import java.util.concurrent.ThreadLocalRandom;
 import java.util.concurrent.TimeUnit;
 
 @Slf4j
 @Service
+@lombok.RequiredArgsConstructor
 public class RestaurantService {
 
-    @Autowired
-    private RestaurantMapper restaurantMapper;
-    @Autowired
-    private ReviewMapper reviewMapper;
-    @Autowired
-    private ReviewService reviewService;
-    @Autowired
-    private ObjectMapper objectMapper;
-    @Autowired
-    private  OutboxEventMapper outboxEventMapper;
-    @Autowired
-    private RestaurantCacheService restaurantCacheService;
-    @Autowired
-    private RestaurantLocalCacheService restaurantLocalCacheService;
-    @Autowired
-    private ApplicationEventPublisher applicationEventPublisher;
-    @Autowired
-    private RestaurantDatabaseService restaurantDatabaseService;
+    private final RestaurantMapper restaurantMapper;
+    private final ObjectMapper objectMapper;
+    private final OutboxEventService outboxEventService;
+    private final RestaurantCacheService restaurantCacheService;
+    private final RestaurantLocalCacheService restaurantLocalCacheService;
+    private final RestaurantDatabaseService restaurantDatabaseService;
 
     static final String RESTAURANT_DETAIL_KEY_PREFIX =
             "restaurant:detail:";
@@ -358,12 +339,10 @@ public class RestaurantService {
             throw new BusinessException("餐厅不存在");
         }
 
-        createRestaurantCacheEvictEvent(restaurantId);
-        applicationEventPublisher.publishEvent(
-                new RestaurantChangedEvent(restaurantId)
-        );
+        outboxEventService.restaurantChanged(restaurantId);
     }
 
+    @Transactional
     public void updateRestaurantStatus(
             Long restaurantId,
             Integer status) {
@@ -385,29 +364,7 @@ public class RestaurantService {
             );
         }
 
-        createRestaurantCacheEvictEvent(restaurantId);
-        // 3. 发事件（事务提交后删本实例本地缓存）
-        applicationEventPublisher.publishEvent(new RestaurantChangedEvent(restaurantId));
+        outboxEventService.restaurantChanged(restaurantId);
     }
 
-    private void createRestaurantCacheEvictEvent(
-            Long restaurantId) {
-
-        OutboxEvent event = new OutboxEvent();
-
-        event.setEventId(UUID.randomUUID().toString());
-        event.setEventType("RESTAURANT_CACHE_EVICT");
-        event.setAggregateId(restaurantId);
-        event.setPayload(String.valueOf(restaurantId));
-        event.setStatus("PENDING");
-        event.setRetryCount(0);
-
-        outboxEventMapper.insert(event);
-
-        log.info(
-                "创建餐厅缓存失效Outbox事件, restaurantId={}, eventId={}",
-                restaurantId,
-                event.getEventId()
-        );
-    }
 }

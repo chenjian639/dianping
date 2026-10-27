@@ -42,7 +42,7 @@ python scripts/smoke_campus.py
 
 ## 主要 API
 
-除注册、登录、搜索、Swagger 和健康探针外均需 `Authorization: Bearer <token>`。普通业务错误沿用现有 `Result` 协议：检查 JSON `code`，成功为 0；未登录为 HTTP 401，管理员越权为 HTTP 403。
+除注册、登录、搜索、Swagger 和健康探针外均需 `Authorization: Bearer <token>`。鉴权统一由 Spring Security 无状态 JWT 过滤链完成；`/merchant/**` 需要 MERCHANT，`/admin/**` 需要 ADMIN。响应保留 `code/msg/data`：成功为 HTTP 200、code=0；错误的 HTTP 状态与 code 一致（400 参数/业务错误、401 未登录、403 无权限、404 不存在、405 方法错误、409 冲突、415 媒体类型错误、500 内部异常）。客户端不能再将所有响应都视为 HTTP 200。
 
 | 方法 | 路径 | 用途 |
 | --- | --- | --- |
@@ -67,19 +67,30 @@ python scripts/smoke_campus.py
 - 固定锁顺序：同用户购物车锁 → 时段容量 → 菜品 ID 升序；取消先订单状态 → 时段 → 菜品升序。
 - Outbox 与业务同事务，定时投递使用 publisher confirm、return 检查、失败重试和 PROCESSING 恢复；属于至少一次投递，消费者必须幂等。达到最大重试的 FAILED 事件需要运营排查，不承诺无限重试。
 - 订单 MQ 延迟队列为 30 分钟；更早的时段开始截止由每 60 秒扫描兜底。正常无积压时提前截止订单的释放可能延迟约一分钟；故障/积压时更长。支付 SQL 始终检查实际截止时间。
-- 详情缓存：Caffeine L1（30 秒）+ Redis L2（随机 TTL）。修改事务提交后清当前 L1，持久队列补偿删除 Redis，再经 fanout 发送到每实例独立匿名队列清 L1。
+- 详情缓存：Caffeine L1（30 秒）+ Redis L2（随机 TTL）。餐厅信息、营业状态、评价统一在业务事务内调用 OutboxEventService 记录事件；提交后清当前 L1，持久队列删除 Redis，再 fanout 清各实例 L1。事件写入失败会回滚业务，不在业务事务内调用 Redis/MQ。
 - 广播为最终一致性。断线实例可能漏收；并发回填可能产生旧值。L1 TTL 限制单次本地条目的寿命，但不代表端到端旧值一定在 30 秒内消失，L2 回填竞态仍需后续版本化治理。搜索缓存约 2 分钟过期，未实现精确失效。
 - Redis 失败降级 DB，回源通过 Bulkhead 隔离；补齐 AOP 依赖使 Resilience4j 注解生效。
-- JWT 使用 JJWT 0.12.6，启动时创建并复用线程安全解析器，避免旧版并发服务发现缺陷。只有无效/过期凭证返回 401，内部异常交由全局异常处理，不伪装成鉴权失败。
+- JWT 使用 JJWT 0.12.6，启动时创建并复用线程安全解析器，避免旧版并发服务发现缺陷。只有无效/过期凭证返回 401，内部异常返回 HTTP 500，不伪装成鉴权失败。
+
+## 代码职责
+
+- Controller 接收/校验请求，统一经 Service 进入业务；核心服务使用构造器注入。
+- OrderService 保留完整业务事务；两种取消共用资源释放逻辑。用户锁归 UserMapper，购物车只保留一个数量修改入口。
+- 订单列表返回 OrderSummaryVO，不暴露幂等键/取餐码；学生本人详情才返回取餐码。
+- OutboxEventService 强制加入已有事务，统一记录订单与餐厅事件；缓存失效监听仅在提交后执行。
+- 评分用 rating_sum + review_count 计算，average_rating 是同一 SQL 从精确总分推导的兼容读取字段；搜索、详情、摘要统一读取该统计。
+- SchedulingConfig 明确分离 outbox- 投递线程与 recovery- 恢复线程，MQ确认等待不阻塞订单过期扫描。
+- 保留单模块、两套Compose与现有多级缓存验证能力；不添加Service/Impl空壳或微服务。详细设计见 [设计说明](docs/design.md)。
 
 ## 数据库迁移
 
-唯一版本来源为 `src/main/resources/db/migration/`：V1 为旧基础表，V2 增加预约时段与订单字段。原 `schema.sql`、`docker/mysql/01-init.sql` 保留作旧版参考，不能当成校园完整结构重复执行。
+唯一版本来源为 `src/main/resources/db/migration/`：V1 为旧基础表，V2 增加预约时段与订单字段，V3 增加精确评分总分并回填历史统计。原 `schema.sql`、`docker/mysql/01-init.sql` 保留作旧版参考，不能当成校园完整结构重复执行。
 
-- 空库：Flyway 执行 V1、V2。
-- 已有无 Flyway 的旧库：备份并核对结构后，以版本 1 baseline，执行 V2。`baseline-on-migrate` 仅适用于结构确实与旧版一致的数据库，不能用于掩盖未知结构差异。
+- 空库：Flyway 执行 V1、V2、V3。
+- 已有无 Flyway 的旧库：备份并核对结构后，以版本 1 baseline，执行 V2、V3。`baseline-on-migrate` 仅适用于结构确实与旧版一致的数据库，不能用于掩盖未知结构差异。
 - 旧订单保留空时段字段，截止时间回填为创建后 30 分钟；旧待支付订单仍可超时取消。旧配送状态 3 与校园待取餐状态 3 的业务含义不同，且旧订单没有取餐码：迁移前应结清旧履约订单，不能直接作为校园订单核销。
-- 不改动已执行的版本文件；后续结构调整增加 V3。发版先做可恢复数据库备份；应用回滚不自动回滚数据库。
+- V3 以评价表为准回填总分/数量/平均分，并写入详情缓存失效事件；发版前备份数据库。旧评分代码不维护 rating_sum，因此 V3 后不要混跑旧、新写入逻辑，回退旧版需同时制定数据恢复/统计重建方案。
+- 不改动已执行的版本文件；后续结构调整增加 V4 及后续版本。发版先做可恢复数据库备份；应用回滚不自动回滚数据库。
 
 ## 测试与 CI/CD
 
@@ -89,7 +100,7 @@ mvn -B clean verify  # 单元测试 + Testcontainers 真实 MySQL 集成并发�
 python scripts/smoke_campus.py # 已启动的校园双实例环境端到端测试
 ```
 
-集成测试验证：100 请求争 20 名额、最后一份库存、失败回滚、同键并发幂等、不同请求竞争同一购物车、跨档口/过期时段拒绝、重复超时/取消、支付竞争、凭码核销及释放失败回滚。Testcontainers 需要运行中的 Docker，缺失时测试失败，不静默跳过。
+集成测试验证：100 请求争 20 名额、最后一份库存、失败回滚、同键并发幂等、不同请求竞争同一购物车、跨档口/过期时段拒绝、重复超时/取消、支付竞争、凭码核销及释放失败回滚，并覆盖评分精度、事件写入失败回滚、提交后缓存失效、V3历史回填和统一购物车校验。Testcontainers 需要运行中的 Docker，缺失时测试失败，不静默跳过。
 
 GitHub Actions 对 main/master 推送与 PR 执行 `clean verify`、构建运行双实例 Docker、执行 API/缓存广播冒烟，保存测试报告和 JAR。
 

@@ -36,7 +36,7 @@ class CampusValidationTest {
         assertThrows(BusinessException.class, () -> service.create(1L,dto));
         verifyNoInteractions(mapper);
         dto.setEndsAt(dto.getStartsAt().plusMinutes(15));
-        assertThrows(BusinessException.class, () -> new PickupSlotController(mapper,service).create("USER",1L,dto));
+        assertThrows(BusinessException.class, () -> new PickupSlotController(service).create(null,dto));
         verifyNoInteractions(mapper);
     }
 }

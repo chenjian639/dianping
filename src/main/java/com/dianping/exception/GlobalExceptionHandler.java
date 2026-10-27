@@ -7,15 +7,19 @@ import org.springframework.validation.FieldError;
 import org.springframework.web.bind.MethodArgumentNotValidException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
+import org.springframework.http.ResponseEntity;
+import org.springframework.http.converter.HttpMessageNotReadableException;
+import org.springframework.web.bind.MissingServletRequestParameterException;
+import org.springframework.web.method.annotation.MethodArgumentTypeMismatchException;
 
 @Slf4j
 @RestControllerAdvice
 public class GlobalExceptionHandler {
 
     @ExceptionHandler(BusinessException.class)
-    public Result<Void> handleBusinessException(BusinessException e) {
+    public ResponseEntity<Result<Void>> handleBusinessException(BusinessException e) {
         log.warn("业务异常: {}", e.getMessage());
-        return Result.error(400, e.getMessage());
+        return ResponseEntity.status(e.getStatus()).body(Result.error(e.getStatus(), e.getMessage()));
     }
 
     @ExceptionHandler(ClientAbortException.class)
@@ -24,7 +28,7 @@ public class GlobalExceptionHandler {
     }
 
     @ExceptionHandler(MethodArgumentNotValidException.class)
-    public Result<Void> handleValidationException(MethodArgumentNotValidException e) {
+    public ResponseEntity<Result<Void>> handleValidationException(MethodArgumentNotValidException e) {
 
         FieldError fieldError =
                 e.getBindingResult().getFieldError();
@@ -36,11 +40,26 @@ public class GlobalExceptionHandler {
 
 
 
-        return Result.error(400, message);
+        return ResponseEntity.badRequest().body(Result.error(400, message));
+    }
+
+    @ExceptionHandler({HttpMessageNotReadableException.class, MissingServletRequestParameterException.class,
+            MethodArgumentTypeMismatchException.class})
+    public ResponseEntity<Result<Void>> handleInvalidRequest(Exception e) {
+        return ResponseEntity.badRequest().body(Result.error(400, "请求参数不合法"));
+    }
+
+    @ExceptionHandler({org.springframework.web.HttpRequestMethodNotSupportedException.class,
+            org.springframework.web.HttpMediaTypeNotSupportedException.class})
+    public ResponseEntity<Result<Void>> handleProtocolError(Exception e) {
+        org.springframework.web.ErrorResponse error = (org.springframework.web.ErrorResponse)e;
+        int status = error.getStatusCode().value();
+        return ResponseEntity.status(status).headers(error.getHeaders())
+                .body(Result.error(status, "请求方法或媒体类型不支持"));
     }
 
     @ExceptionHandler(Exception.class)
-    public Result<Void> handleException(
+    public ResponseEntity<Result<Void>> handleException(
             Exception e) {
 
         log.error(
@@ -48,6 +67,6 @@ public class GlobalExceptionHandler {
                 e
         );
 
-        return Result.error(500, "系统异常，请稍后重试");
+        return ResponseEntity.internalServerError().body(Result.error(500, "系统异常，请稍后重试"));
     }
 }

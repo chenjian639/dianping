@@ -4,7 +4,6 @@ import com.dianping.entity.Restaurant;
 import com.dianping.exception.BusinessException;
 import com.dianping.mapper.RestaurantMapper;
 import com.dianping.vo.RestaurantDetailVO;
-import com.dianping.vo.RestaurantReviewSummaryVO;
 import io.github.resilience4j.bulkhead.annotation.Bulkhead;
 import org.springframework.stereotype.Service;
 
@@ -12,14 +11,11 @@ import org.springframework.stereotype.Service;
 public class RestaurantDatabaseService {
 
     private final RestaurantMapper restaurantMapper;
-    private final ReviewService reviewService;
 
     public RestaurantDatabaseService(
-            RestaurantMapper restaurantMapper,
-            ReviewService reviewService) {
+            RestaurantMapper restaurantMapper) {
 
         this.restaurantMapper = restaurantMapper;
-        this.reviewService = reviewService;
     }
 
     @Bulkhead(
@@ -35,9 +31,6 @@ public class RestaurantDatabaseService {
             throw new BusinessException("餐厅不存在");
         }
 
-        RestaurantReviewSummaryVO summary =
-                reviewService.getRestaurantReviewSummary(id);
-
         RestaurantDetailVO vo =
                 new RestaurantDetailVO();
 
@@ -46,8 +39,8 @@ public class RestaurantDatabaseService {
         vo.setDescription(restaurant.getDescription());
         vo.setAddress(restaurant.getAddress());
         vo.setStatus(restaurant.getStatus());
-        vo.setAverageRating(summary.getAverageRating());
-        vo.setReviewCount(summary.getReviewCount());
+        vo.setAverageRating(restaurant.getAverageRating());
+        vo.setReviewCount(restaurant.getReviewCount());
 
         return vo;
     }

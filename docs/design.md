@@ -45,6 +45,30 @@
 
 Outbox 至少一次投递仍可能在确认后、标记 SENT 前重复发布。超时取消以数据库状态为幂等依据。广播重复删除本地缓存无副作用。投递失败达到上限后保留 FAILED 供排查；失败事件管理界面尚未实现。
 
+## 统一的写入与缓存边界
+
+餐厅信息、营业状态、评价三个写入口都在业务事务中调用 OutboxEventService.restaurantChanged。该组件使用 MANDATORY 传播，禁止脱离事务单独写入事件。先持久化Outbox，再发布本地事件；本地监听器只在提交后失效Caffeine。回滚保留旧缓存，Outbox写入失败则回滚业务和评分。MQ/Redis操作留在事务外的消费链路。
+
+当前保留多级缓存及广播，用于验证跨实例行为。未声称解决旧值并发回填竞态或断线通知丢失；这部分仍是最终一致性边界，后续有性能证据再决定是否进一步精简L1。
+
+## 评分口径
+
+V3新增rating_sum，从评价表回填rating_sum、review_count和average_rating。新增评价时用一条原子SQL先计算ROUND((rating_sum+rating)/(review_count+1),1)，再递增总分和数量。average_rating是兼容查询与排序的派生字段，不再参与下一次计算。
+
+搜索、详情、摘要统一读取餐厅行内统计，去掉详情路径重复聚合评价表的跨Service依赖。1、1、2、1四次评价总分5、数量4，统一得到1.3，而不是逐次舍入后的1.2。
+
+## 调度与接口边界
+
+SchedulingConfig使用两个独立、各单线程的调度器。outbox-每5秒投递，recovery-每30秒恢复卡住事件、每60秒扫描过期订单；发布循环等待确认不占用恢复线程。调度器由Spring管理生命周期，不再混用默认@Scheduled线程。
+
+JWT在Spring Security的过滤链解析并建立SecurityContext，路由统一授权商家和管理员。资源归属仍通过用户/档口ID约束业务SQL；MerchantAccess只检查商家绑定，控制器不再复制角色规则。JSON错误体保留原结构，HTTP状态与code一致，内部异常不会伪装成401或200。
+
+Controller统一经Service查询；用户行锁移动到UserMapper。购物车修改统一校验菜品状态/库存；取消共用资源归还方法。订单列表使用OrderSummaryVO，不让数据库实体决定对外字段。保留数据库回源的独立Bean以确保Bulkhead代理生效，没有为形式上的分层增加接口与实现空壳。
+
+## 迁移与兼容
+
+V1/V2保持不变。V3回填历史统计并生成详情失效事件。旧版本不维护rating_sum，不能在V3后继续混跑旧写入算法；回退需恢复备份或重新校正统计。部署前备份，数据库不自动回滚。
+
 ## 可复现证据
 
 - `mvn clean verify`：单元测试与真实 MySQL 集成测试，包含并发竞争、失败回滚和旧库 baseline 迁移。

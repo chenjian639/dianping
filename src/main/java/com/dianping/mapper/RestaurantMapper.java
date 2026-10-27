@@ -10,6 +10,9 @@ import java.util.List;
 
 @Mapper
 public interface RestaurantMapper {
+    @Select("SELECT average_rating AS averageRating, review_count AS reviewCount FROM restaurant WHERE id = #{restaurantId}")
+    com.dianping.vo.RestaurantReviewSummaryVO selectReviewSummary(Long restaurantId);
+
     @Select("SELECT * FROM restaurant WHERE status = 1")
     List<Restaurant> selectAll();
 
@@ -22,18 +25,6 @@ public interface RestaurantMapper {
             Integer offset,
             Integer pageSize
     );
-
-    @Select("""
-    <script>
-    SELECT COUNT(*)
-    FROM restaurant
-    WHERE status = 1
-    <if test="keyword != null and keyword != ''">
-      AND MATCH(name) AGAINST(#{keyword} IN NATURAL LANGUAGE MODE)
-    </if>
-    </script>
-    """)
-    Long countByKeyword(String keyword);
 
     @Update("""
     UPDATE restaurant
@@ -61,15 +52,8 @@ public interface RestaurantMapper {
 
     @Update("""
     UPDATE restaurant
-    SET average_rating =
-            ROUND(
-                (
-                    average_rating * review_count
-                    + #{rating}
-                )
-                / (review_count + 1),
-                1
-            ),
+    SET average_rating = ROUND((rating_sum + #{rating}) / (review_count + 1), 1),
+        rating_sum = rating_sum + #{rating},
         review_count = review_count + 1
     WHERE id = #{restaurantId}
     """)

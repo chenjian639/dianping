@@ -1,28 +1,27 @@
 package com.dianping.controller;
 
+import com.dianping.security.MerchantAccess;
+
 import com.dianping.common.Result;
 import com.dianping.dto.UpdateRestaurantDTO;
 import com.dianping.dto.UpdateRestaurantStatusDTO;
-import com.dianping.exception.BusinessException;
 import com.dianping.service.RestaurantService;
 import jakarta.validation.Valid;
-import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.web.bind.annotation.*;
 
 @RestController
+@lombok.RequiredArgsConstructor
 @RequestMapping("/merchant/restaurant")
 public class MerchantRestaurantController {
 
-    @Autowired
-    private RestaurantService restaurantService;
+    private final RestaurantService restaurantService;
 
     @PutMapping
     public Result<Void> updateRestaurant(
-            @RequestAttribute("role") String role,
-            @RequestAttribute("restaurantId") Long restaurantId,
+            @RequestAttribute(value = "restaurantId", required = false) Long restaurantId,
             @Valid @RequestBody UpdateRestaurantDTO dto) {
 
-        checkMerchant(role, restaurantId);
+        MerchantAccess.requireRestaurant(restaurantId);
 
         restaurantService.updateRestaurant(
                 restaurantId,
@@ -32,26 +31,12 @@ public class MerchantRestaurantController {
         return Result.success(null);
     }
 
-    private void checkMerchant(
-            String role,
-            Long restaurantId) {
-
-        if (!"MERCHANT".equals(role)
-                || restaurantId == null) {
-
-            throw new BusinessException(
-                    "仅商家可以访问"
-            );
-        }
-    }
-
     @PutMapping("/status")
     public Result<Void> updateStatus(
-            @RequestAttribute("role") String role,
-            @RequestAttribute("restaurantId") Long restaurantId,
+            @RequestAttribute(value = "restaurantId", required = false) Long restaurantId,
             @Valid @RequestBody UpdateRestaurantStatusDTO dto) {
 
-        checkMerchant(role, restaurantId);
+        MerchantAccess.requireRestaurant(restaurantId);
 
         restaurantService.updateRestaurantStatus(
                 restaurantId,

@@ -2,21 +2,17 @@ package com.dianping.controller;
 
 import com.dianping.common.Result;
 import com.dianping.service.CacheRecoveryService;
-import com.dianping.service.OutboxPublisherService;
 import org.springframework.web.bind.annotation.*;
 
 @RestController
-@com.dianping.interceptor.AdminOnly
 @RequestMapping("/admin/cache-recovery")
 public class CacheRecoveryController {
 
     private final CacheRecoveryService cacheRecoveryService;
-    private final OutboxPublisherService outboxPublisherService;
 
     public CacheRecoveryController(
-            CacheRecoveryService cacheRecoveryService, OutboxPublisherService outboxPublisherService) {
+            CacheRecoveryService cacheRecoveryService) {
         this.cacheRecoveryService = cacheRecoveryService;
-        this.outboxPublisherService = outboxPublisherService;
     }
 
     @PostMapping("/start")

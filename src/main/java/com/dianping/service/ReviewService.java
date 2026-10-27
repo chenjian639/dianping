@@ -12,7 +12,6 @@ import com.dianping.mapper.ReviewMapper;
 import com.dianping.vo.MyReviewVO;
 import com.dianping.vo.RestaurantReviewSummaryVO;
 import com.dianping.vo.ReviewVO;
-import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.dao.DuplicateKeyException;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -20,19 +19,16 @@ import org.springframework.transaction.annotation.Transactional;
 import java.util.List;
 
 @Service
+@lombok.RequiredArgsConstructor
 public class ReviewService {
 
-    @Autowired
-    private ReviewMapper reviewMapper;
+    private final ReviewMapper reviewMapper;
 
-    @Autowired
-    private OrderMapper orderMapper;
+    private final OrderMapper orderMapper;
 
-    @Autowired
-    private RestaurantMapper restaurantMapper;
+    private final RestaurantMapper restaurantMapper;
 
-    @Autowired
-    private RestaurantCacheService restaurantCacheService;
+    private final OutboxEventService outboxEventService;
 
     @Transactional
     public Long createReview(
@@ -85,14 +81,7 @@ public class ReviewService {
                     "更新餐厅评分统计失败"
             );
         }
-        // 4. 删除餐厅详情缓存（走熔断保护，Redis 故障时降级跳过）
-        String key = "restaurant:detail:" + order.getRestaurantId();
-
-        try {
-            restaurantCacheService.delete(key);
-        } catch (Exception e) {
-            // 缓存删除失败不影响评价结果
-        }
+        outboxEventService.restaurantChanged(order.getRestaurantId());
         return review.getId();
     }
 
@@ -133,7 +122,9 @@ public class ReviewService {
     public RestaurantReviewSummaryVO getRestaurantReviewSummary(
             Long restaurantId) {
 
-        return reviewMapper.getRestaurantReviewSummary(restaurantId);
+        RestaurantReviewSummaryVO summary = restaurantMapper.selectReviewSummary(restaurantId);
+        if (summary == null) throw new BusinessException(404, "餐厅不存在");
+        return summary;
     }
 
     public PageResult<MyReviewVO> getMyReviews(

@@ -9,6 +9,10 @@ import org.springframework.dao.DuplicateKeyException;
 public class PickupSlotService {
     private final PickupSlotMapper mapper;
     public PickupSlotService(PickupSlotMapper mapper) { this.mapper = mapper; }
+    public java.util.List<PickupSlot> available(Long restaurantId) {
+        return mapper.selectAvailable(restaurantId);
+    }
+
     public Long create(Long restaurantId, CreatePickupSlotDTO dto) {
         if (!dto.getEndsAt().isAfter(dto.getStartsAt())) throw new BusinessException("结束时间必须晚于开始时间");
         PickupSlot slot = new PickupSlot();

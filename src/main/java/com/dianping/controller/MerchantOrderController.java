@@ -1,33 +1,36 @@
 package com.dianping.controller;
 
+import jakarta.validation.Valid;
+import com.dianping.dto.PickupVerificationDTO;
+
+import com.dianping.vo.OrderSummaryVO;
+
+import com.dianping.security.MerchantAccess;
+
 import com.dianping.common.PageResult;
 import com.dianping.common.Result;
-import com.dianping.entity.Order;
 import com.dianping.exception.BusinessException;
 import com.dianping.service.OrderService;
 import com.dianping.vo.OrderDetailVO;
-import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.web.bind.annotation.*;
 
-import java.util.List;
 
 @RestController
+@lombok.RequiredArgsConstructor
 @RequestMapping("/merchant/orders")
 public class MerchantOrderController {
 
-    @Autowired
-    private OrderService orderService;
+    private final OrderService orderService;
 
     @GetMapping
-    public Result<PageResult<Order>> getOrders(
-            @RequestAttribute("role") String role,
+    public Result<PageResult<OrderSummaryVO>> getOrders(
             @RequestAttribute(value = "restaurantId", required = false)
             Long restaurantId,
             @RequestParam(defaultValue = "1") Integer page,
             @RequestParam(defaultValue = "10") Integer pageSize,
             @RequestParam(required = false) Integer status) {
 
-        checkMerchant(role, restaurantId);
+        MerchantAccess.requireRestaurant(restaurantId);
 
         if (page < 1) {
             throw new BusinessException("page不能小于1");
@@ -54,11 +57,10 @@ public class MerchantOrderController {
     @PutMapping("/{id}/prepare")
     public Result<Void> startPreparing(
             @PathVariable Long id,
-            @RequestAttribute("role") String role,
             @RequestAttribute(value = "restaurantId", required = false)
             Long restaurantId) {
 
-        checkMerchant(role, restaurantId);
+        MerchantAccess.requireRestaurant(restaurantId);
 
         orderService.startPreparing(id, restaurantId);
 
@@ -68,11 +70,10 @@ public class MerchantOrderController {
     @PutMapping("/{id}/ready")
     public Result<Void> markReady(
             @PathVariable Long id,
-            @RequestAttribute("role") String role,
             @RequestAttribute(value = "restaurantId", required = false)
             Long restaurantId) {
 
-        checkMerchant(role, restaurantId);
+        MerchantAccess.requireRestaurant(restaurantId);
 
         orderService.markReady(id, restaurantId);
 
@@ -82,39 +83,24 @@ public class MerchantOrderController {
     @PutMapping("/{id}/pickup")
     public Result<Void> completeOrder(
             @PathVariable Long id,
-            @jakarta.validation.Valid @RequestBody com.dianping.dto.PickupVerificationDTO dto,
-            @RequestAttribute("role") String role,
+            @Valid @RequestBody PickupVerificationDTO dto,
             @RequestAttribute(value = "restaurantId", required = false)
             Long restaurantId) {
 
-        checkMerchant(role, restaurantId);
+        MerchantAccess.requireRestaurant(restaurantId);
 
         orderService.completeOrder(id, restaurantId, dto.getPickupCode());
 
         return Result.success(null);
     }
 
-    private void checkMerchant(
-            String role,
-            Long restaurantId) {
-
-        if (!"MERCHANT".equals(role)) {
-            throw new BusinessException("仅商家可以访问");
-        }
-
-        if (restaurantId == null) {
-            throw new BusinessException("商家未绑定餐厅");
-        }
-    }
-
     @GetMapping("/{id}")
     public Result<OrderDetailVO> getOrderDetail(
             @PathVariable Long id,
-            @RequestAttribute("role") String role,
             @RequestAttribute(value = "restaurantId", required = false)
             Long restaurantId) {
 
-        checkMerchant(role, restaurantId);
+        MerchantAccess.requireRestaurant(restaurantId);
 
         return Result.success(
                 orderService.getMerchantOrderDetail(

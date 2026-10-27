@@ -32,7 +32,7 @@ class ReviewServiceTest {
     private RestaurantMapper restaurantMapper;
 
     @Mock
-    private RestaurantCacheService restaurantCacheService;
+    private OutboxEventService outboxEventService;
 
     @InjectMocks
     private ReviewService reviewService;
@@ -125,11 +125,7 @@ class ReviewServiceTest {
                         5
                 );
 
-        // 缓存失效走熔断封装的 RestaurantCacheService
-        verify(restaurantCacheService)
-                .delete(
-                        "restaurant:detail:1"
-                );
+        verify(outboxEventService).restaurantChanged(1L);
     }
 
     @Test

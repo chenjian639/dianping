@@ -7,15 +7,14 @@ import com.dianping.entity.Review;
 import com.dianping.service.ReviewService;
 import com.dianping.vo.MyReviewVO;
 import jakarta.validation.Valid;
-import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.web.bind.annotation.*;
 
 @RestController
+@lombok.RequiredArgsConstructor
 @RequestMapping("/reviews")
 public class ReviewController {
 
-    @Autowired
-    private ReviewService reviewService;
+    private final ReviewService reviewService;
 
     @PostMapping
     public Result<Long> createReview(
