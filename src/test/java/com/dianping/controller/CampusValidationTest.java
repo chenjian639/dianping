@@ -5,6 +5,7 @@ import com.dianping.dto.CreatePickupSlotDTO;
 import com.dianping.dto.PickupVerificationDTO;
 import com.dianping.exception.BusinessException;
 import com.dianping.mapper.PickupSlotMapper;
+import com.dianping.mapper.RestaurantMapper;
 import com.dianping.service.PickupSlotService;
 import jakarta.validation.Validation;
 import org.junit.jupiter.api.Test;
@@ -28,7 +29,7 @@ class CampusValidationTest {
     }
     @Test void timeRangeMustBeIncreasingAndMerchantCannotBeChosenByCaller() {
         var mapper = mock(PickupSlotMapper.class);
-        var service = new PickupSlotService(mapper);
+        var service = new PickupSlotService(mapper, mock(RestaurantMapper.class));
         var dto = new CreatePickupSlotDTO();
         dto.setStartsAt(LocalDateTime.now().plusHours(2));
         dto.setEndsAt(LocalDateTime.now().plusHours(1));

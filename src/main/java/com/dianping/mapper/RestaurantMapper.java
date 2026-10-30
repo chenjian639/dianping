@@ -19,6 +19,9 @@ public interface RestaurantMapper {
     @Select("SELECT * FROM restaurant WHERE id = #{id}")
     Restaurant selectById(Long id);
 
+    @Select("SELECT id FROM restaurant WHERE id = #{id} FOR UPDATE")
+    Long lockById(Long id);
+
     List<RestaurantSearchVO> searchByKeywordPage(
             String keyword,
             String sort,

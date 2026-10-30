@@ -1,6 +1,7 @@
 package com.dianping.service;
 
 import com.dianping.entity.Order;
+import com.dianping.dto.CreatePickupSlotDTO;
 import com.dianping.exception.BusinessException;
 import com.dianping.mapper.OrderMapper;
 import org.junit.jupiter.api.*;
@@ -18,6 +19,7 @@ import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
 
 import java.util.*;
+import java.time.LocalDateTime;
 import java.util.concurrent.*;
 import java.util.function.IntConsumer;
 import static org.junit.jupiter.api.Assertions.*;
@@ -56,6 +58,7 @@ class CampusOrderIT {
     @Autowired OrderService service;
     @Autowired OrderMapper orders;
     @Autowired JdbcTemplate db;
+    @Autowired PickupSlotService pickupSlots;
 
     @BeforeEach void seed() {
         cache.invalidateAll();
@@ -82,6 +85,51 @@ class CampusOrderIT {
             start.countDown();
             for (Future<?> job : jobs) job.get(60, TimeUnit.SECONDS);
         } finally { pool.shutdownNow(); }
+    }
+
+    @Test
+    void overlappingSlotsAreRejectedIncludingContainmentAndIdenticalRanges() {
+        LocalDateTime start = db.queryForObject(
+                "SELECT starts_at FROM pickup_slot WHERE id=1", LocalDateTime.class);
+        int[][] ranges = {{-15, 15}, {45, 75}, {15, 45}, {-15, 75}, {0, 60}};
+        for (int[] range : ranges) {
+            BusinessException error = assertThrows(BusinessException.class,
+                    () -> pickupSlots.create(1L, slotRequest(
+                            start.plusMinutes(range[0]), start.plusMinutes(range[1]))));
+            assertTrue(error.getMessage().contains("重叠"));
+        }
+        assertEquals(1, number("SELECT COUNT(*) FROM pickup_slot"));
+    }
+
+    @Test
+    void adjacentSlotsAndOverlappingSlotsAtOtherRestaurantsAreAllowed() {
+        LocalDateTime start = db.queryForObject(
+                "SELECT starts_at FROM pickup_slot WHERE id=1", LocalDateTime.class);
+        assertNotNull(pickupSlots.create(1L, slotRequest(start.minusMinutes(30), start)));
+        assertNotNull(pickupSlots.create(1L, slotRequest(start.plusHours(1), start.plusHours(2))));
+        assertNotNull(pickupSlots.create(2L, slotRequest(start, start.plusHours(1))));
+        assertEquals(4, number("SELECT COUNT(*) FROM pickup_slot"));
+    }
+
+    @Test
+    void concurrentOverlappingCreationAtAnEmptyRestaurantSucceedsOnlyOnce() throws Exception {
+        LocalDateTime start = LocalDateTime.now().plusDays(1).withNano(0);
+        parallel(12, i -> {
+            try {
+                pickupSlots.create(2L, slotRequest(start.plusMinutes(i), start.plusHours(1)));
+            } catch (BusinessException e) {
+                assertTrue(e.getMessage().contains("重叠"));
+            }
+        });
+        assertEquals(1, number("SELECT COUNT(*) FROM pickup_slot WHERE restaurant_id=2"));
+    }
+
+    private CreatePickupSlotDTO slotRequest(LocalDateTime start, LocalDateTime end) {
+        CreatePickupSlotDTO dto = new CreatePickupSlotDTO();
+        dto.setStartsAt(start);
+        dto.setEndsAt(end);
+        dto.setCapacity(20);
+        return dto;
     }
 
     @Test void hundredRequestsCannotExceedTwentySlots() throws Exception {
