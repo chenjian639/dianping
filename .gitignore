@@ -23,3 +23,6 @@ Thumbs.db
 # Local verification output
 .sandbox-tmp/
 __pycache__/
+
+# Private interview preparation (local only)
+/interview-notes/

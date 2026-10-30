@@ -4,10 +4,8 @@ import com.dianping.common.Result;
 import com.dianping.dto.LoginDTO;
 import com.dianping.dto.RegisterDTO;
 import com.dianping.service.UserService;
-import com.dianping.util.JwtUtil;
 import com.dianping.vo.LoginVO;
 import com.dianping.vo.UserVO;
-import io.jsonwebtoken.Claims;
 import jakarta.validation.Valid;
 import org.springframework.web.bind.annotation.*;
 

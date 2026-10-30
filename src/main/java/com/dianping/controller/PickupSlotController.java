@@ -16,8 +16,10 @@ public class PickupSlotController {
     }
     @GetMapping("/restaurants/{id}/pickup-slots")
     public Result<List<PickupSlot>> available(@PathVariable Long id) {
+
         return Result.success(service.available(id));
     }
+
     @PostMapping("/merchant/pickup-slots")
     public Result<Long> create(
             @RequestAttribute(value="restaurantId", required=false) Long restaurantId,

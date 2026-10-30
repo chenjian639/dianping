@@ -16,9 +16,14 @@ class SchedulingConfigTest {
         CountDownLatch recovering = new CountDownLatch(1);
         OutboxPublisherService publisher = mock(OutboxPublisherService.class);
         OrderTimeoutRecoveryService orders = mock(OrderTimeoutRecoveryService.class);
-        doAnswer(call -> { publishing.countDown(); release.await(5,TimeUnit.SECONDS); return null; })
+
+        doAnswer(call -> { publishing.countDown();
+            release.await(5,TimeUnit.SECONDS); return null; })
                 .when(publisher).publishPending();
-        doAnswer(call -> { recovering.countDown(); return null; }).when(orders).recoverExpiredOrders();
+
+        doAnswer(call -> { recovering.countDown(); return null; })
+                .when(orders).recoverExpiredOrders();
+
         try (var context = new AnnotationConfigApplicationContext()) {
             context.registerBean(OutboxPublisherService.class, () -> publisher);
             context.registerBean(OrderTimeoutRecoveryService.class, () -> orders);

@@ -23,7 +23,6 @@ public class RestaurantDatabaseService {
             type = Bulkhead.Type.SEMAPHORE
     )
     public RestaurantDetailVO loadRestaurantDetail(Long id) {
-
         Restaurant restaurant =
                 restaurantMapper.selectById(id);
 

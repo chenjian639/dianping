@@ -8,7 +8,9 @@ import java.util.List;
 public interface OrderMapper {
     @Select("SELECT * FROM orders WHERE id = #{id}")
     Order selectById(Long id);
-    @Update("UPDATE orders SET status = 4 WHERE id = #{id} AND restaurant_id = #{restaurantId} AND status = 3 AND pickup_code = #{code}")
+
+    @Update("UPDATE orders SET status = 4 WHERE id = #{id} " +
+            "AND restaurant_id = #{restaurantId} AND status = 3 AND pickup_code = #{code}")
     int verifyPickup(Long id, Long restaurantId, String code);
 
 

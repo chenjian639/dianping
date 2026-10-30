@@ -10,6 +10,7 @@ public class PickupSlotService {
     private final PickupSlotMapper mapper;
     public PickupSlotService(PickupSlotMapper mapper) { this.mapper = mapper; }
     public java.util.List<PickupSlot> available(Long restaurantId) {
+
         return mapper.selectAvailable(restaurantId);
     }
 
