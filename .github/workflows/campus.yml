@@ -79,7 +79,7 @@ jobs:
       inputs.deploy))
     needs: verify
     runs-on: ubuntu-24.04
-    timeout-minutes: 30
+    timeout-minutes: 50
     concurrency:
       group: campus-production
       cancel-in-progress: false
