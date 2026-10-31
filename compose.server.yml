@@ -53,7 +53,11 @@ services:
     mem_limit: 768m
     environment:
       TZ: Asia/Shanghai
-      JAVA_TOOL_OPTIONS: -Duser.timezone=Asia/Shanghai -Xms128m -Xmx384m
+      JAVA_TOOL_OPTIONS: >-
+        -Duser.timezone=Asia/Shanghai
+        -Xms128m
+        -Xmx384m
+        -Xlog:gc*:stdout:time,uptime,level,tags
       SPRING_DATASOURCE_URL: jdbc:mysql://mysql:3306/dodo_food?useUnicode=true&characterEncoding=utf8&serverTimezone=Asia/Shanghai&allowPublicKeyRetrieval=true&useSSL=false
       SPRING_DATASOURCE_USERNAME: campus
       SPRING_DATASOURCE_PASSWORD: ${MYSQL_PASSWORD:?Generate .env.server first}
