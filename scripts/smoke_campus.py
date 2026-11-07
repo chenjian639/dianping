@@ -53,6 +53,11 @@ def wait_ready():
 
 def run():
     wait_ready()
+    with urllib.request.urlopen(BASES[0]+'/',timeout=15) as response:
+        assert response.status==200 and '校园取餐' in response.read().decode('utf-8')
+    for asset in ('/ui/app.js', '/ui/style.css'):
+        with urllib.request.urlopen(BASES[0]+asset,timeout=15) as response:
+            assert response.status==200 and len(response.read())>100
     with urllib.request.urlopen(BASES[0]+'/v3/api-docs',timeout=15) as response:
         spec=json.load(response)
         assert spec['info']['title']=='校园预约取餐 API'
@@ -133,9 +138,43 @@ def run():
         time.sleep(.25)
     else: raise AssertionError('Restaurant status invalidation did not reach both instances')
     api('PUT','/merchant/restaurant/status',dict(status=1),tokens[0])
+    # Synthetic WGS84 points only. Exercise the real Outbox -> MQ -> GEO path, not public data.
+    admin_name = 'a' + prefix
+    api('POST','/users/register',dict(username=admin_name,password='CampusSmoke123',nickname=admin_name,
+        phone='1'+str(random.randrange(10**9,10**10))))
+    sql(f"UPDATE user SET role='ADMIN' WHERE username='{admin_name}'")
+    admin = api('POST','/users/login',dict(username=admin_name,password='CampusSmoke123'))['token']
+    location = dict(name='Synthetic GEO '+prefix,address='Test only, not a real campus',
+        longitude=0.001,latitude=0,entranceInstructions='Synthetic entrance',enabled=True,coordinateSystem='WGS84')
+    query = dict(longitude=0,latitude=0,radiusMeters=500,limit=100,coordinateSystem='WGS84')
+    api('POST','/canteens/nearby',query,expected=401)
+    api('POST','/admin/canteens',location,tokens[0],expected=403)
+    canteen = api('POST','/admin/canteens',location,admin)
+    assert canteen in [c['id'] for c in api('POST','/canteens/nearby',query,tokens[1],BASES[1])]
+    def indexed_revision():
+        return subprocess.run(['docker','compose','-f','compose.campus.yml','exec','-T','redis',
+            'redis-cli','GET','canteen:{locations}:ready'],capture_output=True,text=True,check=True).stdout.strip()
+    revision = sql('SELECT revision FROM canteen_geo_state WHERE id=1')
+    for attempt in range(80):
+        if indexed_revision()==revision: break
+        time.sleep(.25)
+    else: raise AssertionError('Outbox/MQ did not synchronize canteen GEO revision')
+    found = next(c for c in api('POST','/canteens/nearby',query,tokens[1]) if c['id']==canteen)
+    assert found['distanceType']=='STRAIGHT_LINE' and found['coordinateSystem']=='WGS84'
+    assert 100 < found['distanceMeters'] < 120
+    api('PUT',f'/admin/restaurants/{restaurant}/canteen',dict(canteenId=canteen),admin)
+    api('PUT','/merchant/restaurant/location',dict(floor='2F',windowNumber='08',pickupInstructions='Test entrance'),tokens[0])
+    position = api('GET',f'/restaurants/{restaurant}/location',token=tokens[1],base=BASES[1])
+    assert position['canteenId']==canteen and position['windowNumber']=='08'
+    location['longitude']=1
+    api('PUT',f'/admin/canteens/{canteen}',location,admin)
+    assert canteen not in [c['id'] for c in api('POST','/canteens/nearby',query,tokens[1],BASES[1])]
+    api('DELETE',f'/admin/canteens/{canteen}',token=admin)
+    api('POST','/admin/canteens/geo-index/rebuild',{},admin)
+    assert canteen not in [c['id'] for c in api('POST','/canteens/nearby',query,tokens[1])]
     with urllib.request.urlopen('http://127.0.0.1:18080/actuator/health/liveness',timeout=5) as response:
         assert response.headers.get('X-Campus-Upstream')
         assert json.load(response)['status']=='UP'
-    print('PASS: capacity, stock, idempotency, pickup, cancellation, Security/HTTP, list VO, metadata/review/status cache broadcasts and gateway')
+    print('PASS: capacity, stock, idempotency, pickup, cancellation, Security/HTTP, list VO, cache broadcasts, canteen GEO/Outbox/location and gateway')
 
 if __name__=='__main__': run()

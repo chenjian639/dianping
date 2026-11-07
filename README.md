@@ -43,6 +43,8 @@ python scripts/smoke_campus.py
 
 ## 主要 API
 
+浏览器前端入口为 `/`，包含学生预约、商家备餐核销与管理员食堂管理，直接随JAR发布，无需额外前端构建。使用说明与Actions上传瓶颈分析见[前端与发布](docs/frontend.md)。
+
 除注册、登录、搜索、Swagger 和健康探针外均需 `Authorization: Bearer <token>`。鉴权统一由 Spring Security 无状态 JWT 过滤链完成；`/merchant/**` 需要 MERCHANT，`/admin/**` 需要 ADMIN。响应保留 `code/msg/data`：成功为 HTTP 200、code=0；错误的 HTTP 状态与 code 一致（400 参数/业务错误、401 未登录、403 无权限、404 不存在、405 方法错误、409 冲突、415 媒体类型错误、500 内部异常）。客户端不能再将所有响应都视为 HTTP 200。
 
 | 方法 | 路径 | 用途 |
@@ -58,9 +60,17 @@ python scripts/smoke_campus.py
 | PUT | `/merchant/orders/{id}/ready` | 标记待取餐 |
 | PUT | `/merchant/orders/{id}/pickup` | 核销：`{"pickupCode":"订单中的32位码"}` |
 | POST | `/admin/cache-recovery/start`、`/stop` | 仅 ADMIN 启停死信重放 |
+| POST | `/canteens/nearby` | 登录后按WGS84参考位置查询附近启用食堂，返回直线距离；不保存用户位置 |
+| GET/POST/PUT/DELETE | `/admin/canteens`、`/admin/canteens/{id}` | 管理食堂入口位置与启用状态，仅 ADMIN |
+| POST | `/admin/canteens/geo-index/rebuild` | 仅 ADMIN 内部重建 Redis GEO 索引 |
+| PUT | `/admin/restaurants/{id}/canteen` | 管理员关联/解除档口所属食堂 |
+| GET | `/restaurants/{id}/location` | 登录后查询食堂关联、楼层、窗口号及取餐说明 |
+| PUT | `/merchant/restaurant/location` | 商家只维护 token 绑定档口的楼层、窗口号及取餐说明 |
 | GET | `/actuator/health/liveness`、`/readiness` | 存活 / 依赖就绪检查 |
 
 旧 `/deliver`、`/complete` 接口已移除，避免绕过凭码核销。餐厅、菜品、评价、搜索、商家管理的其他接口见 Swagger。
+
+食堂与档口分开建模，坐标只保存在食堂入口。MySQL 是正式数据，Redis GEO 是可重建索引；未就绪/故障回退数据库候选点与Java直线距离计算。接口、合成示例和一致性边界见 [食堂位置说明](docs/canteen-locations.md)。
 
 ## 可靠性与一致性边界
 
@@ -85,23 +95,26 @@ python scripts/smoke_campus.py
 
 ## 数据库迁移
 
-唯一版本来源为 `src/main/resources/db/migration/`：V1 为旧基础表，V2 增加预约时段与订单字段，V3 增加精确评分总分并回填历史统计。原 `schema.sql`、`docker/mysql/01-init.sql` 保留作旧版参考，不能当成校园完整结构重复执行。
+唯一版本来源为 `src/main/resources/db/migration/`：V1 为旧基础表，V2 增加预约时段与订单字段，V3 增加精确评分总分并回填历史统计，V4 增加食堂入口位置与档口可空关联。原 `schema.sql`、`docker/mysql/01-init.sql` 保留作旧版参考，不能当成校园完整结构重复执行。
 
-- 空库：Flyway 执行 V1、V2、V3。
-- 已有无 Flyway 的旧库：备份并核对结构后，以版本 1 baseline，执行 V2、V3。`baseline-on-migrate` 仅适用于结构确实与旧版一致的数据库，不能用于掩盖未知结构差异。
+- 空库：Flyway 执行 V1～V4。
+- 已有无 Flyway 的旧库：备份并核对结构后，以版本 1 baseline，执行 V2～V4。`baseline-on-migrate` 仅适用于结构确实与旧版一致的数据库，不能用于掩盖未知结构差异。
 - 旧订单保留空时段字段，截止时间回填为创建后 30 分钟；旧待支付订单仍可超时取消。旧配送状态 3 与校园待取餐状态 3 的业务含义不同，且旧订单没有取餐码：迁移前应结清旧履约订单，不能直接作为校园订单核销。
 - V3 以评价表为准回填总分/数量/平均分，并写入详情缓存失效事件；发版前备份数据库。旧评分代码不维护 rating_sum，因此 V3 后不要混跑旧、新写入逻辑，回退旧版需同时制定数据恢复/统计重建方案。
-- 不改动已执行的版本文件；后续结构调整增加 V4 及后续版本。发版先做可恢复数据库备份；应用回滚不自动回滚数据库。
+- V4 不给旧档口编造食堂或坐标，旧档口可以保持未关联，订单、时段和核销继续使用原逻辑。删除食堂为软删除，不级联删除历史档口或订单。
+- 不改动已执行的版本文件；后续结构调整增加 V5 及后续版本。发版先做可恢复数据库备份；应用回滚不自动回滚数据库。
 
 ## 测试与 CI/CD
 
 ```powershell
 mvn -B test        # 单元测试，不要求 Docker
-mvn -B clean verify  # 单元测试 + Testcontainers 真实 MySQL 集成并发测试 + 打包
+mvn -B clean verify  # 单元测试 + Testcontainers 真实 MySQL/Redis 集成测试 + 打包
 python scripts/smoke_campus.py # 已启动的校园双实例环境端到端测试
 ```
 
 集成测试验证：100 请求争 20 名额、最后一份库存、失败回滚、同键并发幂等、不同请求竞争同一购物车、跨档口/过期时段拒绝、重复超时/取消、支付竞争、凭码核销及释放失败回滚，并覆盖评分精度、事件写入失败回滚、提交后缓存失效、V3历史回填和统一购物车校验。Testcontainers 需要运行中的 Docker，缺失时测试失败，不静默跳过。
+
+食堂位置测试另覆盖：权限与资源归属、坐标/文本校验、Redis GEO与Java距离语义一致、停用/删除、重复/晚到事件、业务与Outbox回滚、索引丢失及Redis超时回退。双实例HTTP smoke同时验证真实Outbox→RabbitMQ→GEO与档口位置接口。
 
 GitHub Actions 对 main/master 推送与 PR 执行 `clean verify`、构建运行双实例 Docker、执行 API/缓存广播冒烟，保存测试报告和 JAR。
 

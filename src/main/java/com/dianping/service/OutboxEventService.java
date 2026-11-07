@@ -30,6 +30,10 @@ public class OutboxEventService {
         record("ORDER_TIMEOUT_CHECK", orderId);
     }
 
+    public void canteenGeoChanged(Long canteenId) {
+        record("CANTEEN_GEO_CHANGED", canteenId);
+    }
+
     private void record(String type, Long aggregateId) {
         OutboxEvent event = new OutboxEvent();
         event.setEventId(UUID.randomUUID().toString());

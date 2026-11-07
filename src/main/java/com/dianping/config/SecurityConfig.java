@@ -26,7 +26,7 @@ public class SecurityConfig {
                         .authenticationEntryPoint((request, response, e) -> errors.write(response, 401, "请先登录"))
                         .accessDeniedHandler((request, response, e) -> errors.write(response, 403, "无权访问")))
                 .authorizeHttpRequests(auth -> auth
-                        .requestMatchers("/users/login", "/users/register", "/restaurants/search",
+                        .requestMatchers("/", "/index.html", "/ui/**", "/favicon.ico", "/users/login", "/users/register", "/restaurants/search",
                                 "/swagger-ui/**", "/swagger-ui.html", "/v3/api-docs/**",
                                 "/actuator/health", "/actuator/health/**").permitAll()
                         .requestMatchers("/admin/**").hasRole("ADMIN")

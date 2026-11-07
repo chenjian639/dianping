@@ -2,11 +2,13 @@ package com.dianping.config;
 
 import com.dianping.service.OrderTimeoutRecoveryService;
 import com.dianping.service.OutboxPublisherService;
+import com.dianping.service.CanteenGeoIndexService;
 import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.scheduling.concurrent.ThreadPoolTaskScheduler;
 import org.springframework.scheduling.config.ScheduledTaskRegistrar;
+import org.springframework.scheduling.config.IntervalTask;
 
 /** Slow publisher confirms must not occupy the order-expiration recovery thread. */
 @Configuration
@@ -28,10 +30,12 @@ public class SchedulingConfig {
     @Bean
     public ScheduledTaskRegistrar outboxTasks(
             @Qualifier("outboxScheduler") ThreadPoolTaskScheduler scheduler,
-            OutboxPublisherService publisher) {
+            OutboxPublisherService publisher, CanteenGeoIndexService canteenIndex) {
         ScheduledTaskRegistrar tasks = new ScheduledTaskRegistrar();
         tasks.setTaskScheduler(scheduler);
         tasks.addFixedDelayTask(publisher::publishPending, 5000);
+        // Reconcile even after index eviction or terminal MQ/Outbox failure, away from order recovery.
+        tasks.addFixedDelayTask(new IntervalTask(canteenIndex::rebuild, 300000, 300000));
         return tasks;
     }
 

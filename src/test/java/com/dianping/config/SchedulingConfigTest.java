@@ -2,6 +2,7 @@ package com.dianping.config;
 
 import com.dianping.service.OrderTimeoutRecoveryService;
 import com.dianping.service.OutboxPublisherService;
+import com.dianping.service.CanteenGeoIndexService;
 import org.junit.jupiter.api.Test;
 import org.springframework.context.annotation.AnnotationConfigApplicationContext;
 import java.util.concurrent.CountDownLatch;
@@ -27,6 +28,7 @@ class SchedulingConfigTest {
         try (var context = new AnnotationConfigApplicationContext()) {
             context.registerBean(OutboxPublisherService.class, () -> publisher);
             context.registerBean(OrderTimeoutRecoveryService.class, () -> orders);
+            context.registerBean(CanteenGeoIndexService.class, () -> mock(CanteenGeoIndexService.class));
             context.register(SchedulingConfig.class);
             context.refresh();
             try {

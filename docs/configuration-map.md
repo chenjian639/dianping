@@ -44,3 +44,5 @@ Dockerfile 是唯一镜像构建定义：默认源码构建；--target runtime �
 服务器密码初始化用 python3 scripts/init_server_env.py；已有环境不要覆盖或重新生成。修改环境文件不会自动改变已有数据库账号密码。操作命令见 [部署指南](server-deployment.md)。
 
 应用内部的角色授权集中在SecurityConfig，调度分离集中在SchedulingConfig，不分散到Compose或控制器重复配置。V3评分迁移与错误HTTP状态变化见README，自动部署仍执行相同的CI验证与备份步骤。
+
+食堂位置从V4迁移读取MySQL正式数据；不需要新的服务、端口或地图API密钥。GEO键为canteen:{locations}:geo与canteen:{locations}:ready，统一WGS84。Outbox新增canteen.geo.changed持久队列、canteen.geo.dlx与canteen.geo.dlq；五分钟对账任务复用SchedulingConfig的outbox线程。重建接口仍受/admin/**的ADMIN权限保护，附近查询保持登录要求。详情见[canteen-locations.md](canteen-locations.md)。

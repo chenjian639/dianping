@@ -58,6 +58,24 @@ CI 40260329229 在首次跨实例并发下单时返回 401，部署 job 被跳�
 CI 使用相同测试与 Compose 冒烟命令。CD 尚未在远端执行，生产的 systemd、SSH、数据库备份与回滚需按 README 配置后手动触发。本次没有连接或更改原云端服务。
 
 
+## 2026-11-07 前端与发布优化（本地验证）
+
+- 完整 `mvn -B verify`：23项单元/Web测试、30项MySQL/Redis集成测试通过，无跳过；`node --check` 和workflow YAML解析通过。
+- 本地最终源码镜像双实例HTTP smoke PASS，增加首页及JS/CSS匿名访问断言，原订单、权限和GEO/Outbox链路通过。
+- 独立headless Chrome：桌面截图检查、手机390px无横向溢出、真实表单注册登录、选菜/购物车/时段预约/订单与32位取餐码验收通过。只使用本地专用测试账号。
+- 只含运行文件、不含pom/src的精简发布目录通过Docker `--target runtime`构建验证；历史deploy日志定位上传约35分钟、构建及readiness不到1分钟。已减少发布内容、复用CI JAR及镜像，上传增加存活检测与10分钟上限。
+- 上述为本地验证；推送后Actions及生产部署结果应单独检查。截图和日志均在本地忽略目录 `.sandbox-tmp/`。
+
+## 2026-11-01 食堂入口位置与Redis GEO验证（本地，未部署）
+
+- 新增V4，V1～V3未改；原订单、库存、时段和核销实现未改。
+- 完整 `mvn -B verify`：23项单元/Web测试、28项MySQL/Redis集成测试通过。后续补充换日线与旧Redis命令晚到保护，定向 `mvn -B -Dtest=CanteenSecurityTest -Dit.test=CanteenLocationIT verify`：4项权限测试、11项位置集成测试通过。原19项订单集成测试在完整回归中通过；不同测试用例合计23项单元/Web、30项集成，无跳过。
+- 真实Redis边界测试曾发现经度180°对-180°附近地点召回不一致，现对范围触及换日线/Redis纬度边界的请求使用数据库候选计算；同一测试回归通过。
+- 真实MySQL/Redis验证：GEOSEARCH、就绪版本/成员数、索引丢失、Redis超时/错误类型回退、停用删除、事务/Outbox失败回滚、重复旧事件、并发重建，以及Lua拒绝旧发布版本。
+- 本地Docker最终源码镜像双实例HTTP smoke PASS：原预约/库存/幂等/核销/取消/缓存广播保持通过，新增ADMIN权限、食堂管理、跨实例附近查询、档口位置说明、真实Outbox→RabbitMQ→GEO同步与内部重建通过。
+- 本地实际OpenAPI核对：`/canteens/nearby` 为POST JSON请求体，包含coordinateSystem/longitude/latitude/radiusMeters/limit，管理员重建接口存在，沿用BearerAuth。
+- 结果日志（仅本地忽略目录）：`.sandbox-tmp/canteen-final-verify.log`、`.sandbox-tmp/canteen-location-final.log`、`.sandbox-tmp/canteen-final-smoke.log`。未执行线上性能测试，没有提交、推送、部署。
+
 ## 2026-10-26 配置精简验证
 
 - 删除旧默认Compose和独立SSH检查工作流；两套现用Compose配置解析通过。

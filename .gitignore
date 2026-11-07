@@ -26,3 +26,9 @@ __pycache__/
 
 # Private interview preparation (local only)
 /interview-notes/
+
+# Local deployment audit and performance preparation
+/docs/online-verification-and-performance.md
+/scripts/audit_server.sh
+/scripts/perf_campus.py
+/scripts/test_perf_campus.py

@@ -159,6 +159,9 @@ public class OutboxPublisherService {
 
         switch (event.getEventType()) {
 
+            case "CANTEEN_GEO_CHANGED" -> rabbitTemplate.convertAndSend(
+                    "", RabbitMQConfig.CANTEEN_GEO_QUEUE, event.getAggregateId(), correlationData);
+
             case "RESTAURANT_CACHE_EVICT" ->
 
                     rabbitTemplate.convertAndSend(
