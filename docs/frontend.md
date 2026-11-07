@@ -19,6 +19,8 @@
 
 1. verify已经构建runtime-check镜像，双实例直接将其标记为local并`up --no-build`，不再为冒烟重新进行Maven源码编译，验证和部署使用同一份CI JAR。
 2. 发布包仅带Dockerfile、.dockerignore、compose.server.yml、网关配置、部署脚本及JAR，不再归档所有源代码和历史压测SQL（仓库中该SQL约9MB）。前端已包含在JAR内。
-3. 用gzip -1打包已压缩的JAR，输出包大小；SCP设置ServerAliveInterval/CountMax和600秒总时限，上传step上限12分钟，避免无反馈挂至整个deploy的50分钟。
+3. 初次优化曾使用SCP和600秒上限；run `42324130906` 的验证全部通过，但50MB发布包在上传阶段超过上限，退出124，部署步骤未执行。这说明超时设置只缩短失败等待，没有解决传输瓶颈。
+4. 后续改为rsync传输未整体压缩的运行目录：以服务器现有 `~/campus-pickup` 为只读差异基准，保留 `.rsync-partial`，显示进度与传输统计；相同提交重跑复用同一个upload目录。每次最多12分钟，最多3次尝试，step上限38分钟；无数据传输120秒退出。成功后校验服务器JAR的SHA-256，在服务器本地打包并原子重命名，再执行原备份/部署脚本。
+5. 不使用 `--delete`、`--inplace` 或硬链接，不直接增量修改正在部署的JAR；中途失败只留下独立incoming目录与分块文件，不进入部署。缓存目录和上传包后续仍需保留策略。
 
-这些调整减少重复构建、无关传输和故障等待，不保证海外GitHub runner到腾讯云的网络吞吐。若新运行仍在上传超时，下一步可选择服务器上的受控self-hosted runner或境内制品分发；本轮未安装runner或修改服务器网络。push会触发现有CI/CD，构建通过和生产部署成功要分别观察。
+rsync增量和断点机制依据[官方手册](https://download.samba.org/pub/rsync/rsync.1.html)。这些调整减少重复构建与重复传输，不保证首次上传或跨境链路必然变快。若增量传输仍不可用，需考虑受控self-hosted runner或境内制品分发；本轮未安装runner或修改服务器网络。push会触发现有CI/CD，构建通过和生产部署成功要分别观察。
