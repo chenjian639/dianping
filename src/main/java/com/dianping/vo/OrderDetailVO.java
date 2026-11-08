@@ -11,13 +11,14 @@ import java.util.List;
 public class OrderDetailVO {
 
     private Long id;
-    private Long pickupSlotId;
-    private String pickupCode;
     private LocalDateTime expiresAt;
 
     private Long restaurantId;
 
     private BigDecimal totalAmount;
+    private BigDecimal goodsAmount;
+    private BigDecimal freightAmount;
+    private String shippingAddress;
 
     private Integer status;
 

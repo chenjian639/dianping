@@ -2,7 +2,6 @@ package com.dianping.config;
 
 import com.dianping.service.OrderTimeoutRecoveryService;
 import com.dianping.service.OutboxPublisherService;
-import com.dianping.service.CanteenGeoIndexService;
 import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
@@ -30,12 +29,10 @@ public class SchedulingConfig {
     @Bean
     public ScheduledTaskRegistrar outboxTasks(
             @Qualifier("outboxScheduler") ThreadPoolTaskScheduler scheduler,
-            OutboxPublisherService publisher, CanteenGeoIndexService canteenIndex) {
+            OutboxPublisherService publisher) {
         ScheduledTaskRegistrar tasks = new ScheduledTaskRegistrar();
         tasks.setTaskScheduler(scheduler);
         tasks.addFixedDelayTask(publisher::publishPending, 5000);
-        // Reconcile even after index eviction or terminal MQ/Outbox failure, away from order recovery.
-        tasks.addFixedDelayTask(new IntervalTask(canteenIndex::rebuild, 300000, 300000));
         return tasks;
     }
 

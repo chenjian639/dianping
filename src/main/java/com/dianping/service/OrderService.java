@@ -24,13 +24,14 @@ public class OrderService {
 
     private final CartItemMapper cartItemMapper;
 
-    private final DishMapper dishMapper;
+    private final ProductMapper productMapper;
 
     private final OrderMapper orderMapper;
 
     private final UserMapper userMapper;
 
-    private final PickupSlotMapper pickupSlotMapper;
+    private final InventoryService inventory;
+    private final RestaurantMapper restaurants;
 
     private final OrderItemMapper orderItemMapper;
 
@@ -39,12 +40,10 @@ public class OrderService {
     @Transactional
     public Long createOrder(
             Long userId,
-            String requestId, Long pickupSlotId) {
+            String requestId, String shippingAddress) {
 
-        if (requestId == null || requestId.isBlank() || requestId.length() > 64 || pickupSlotId == null) {
-            throw new BusinessException(
-                    "requestId须为1到64字符且必须指定取餐时段"
-            );
+        if (requestId == null || requestId.isBlank() || requestId.length() > 64 || shippingAddress == null || shippingAddress.isBlank() || shippingAddress.length() > 500) {
+            throw new BusinessException("requestId须为1到64字符且必须填写收货地址");
         }
 
         // 同一用户的下单串行化，避免不同请求重复购买同一份购物车。
@@ -57,49 +56,37 @@ public class OrderService {
                 );
 
         if (existing != null) {
-            if (!Objects.equals(existing.getPickupSlotId(), pickupSlotId)) throw new BusinessException("幂等键已用于其他时段");
+            if (!Objects.equals(existing.getShippingAddress(), shippingAddress)) throw new BusinessException("幂等键已用于不同收货地址");
             return existing.getId();
         }
 
         // 2. 查询购物车
-        List<CartItemVO> cartItems =
-                cartItemMapper.selectCartByUserId(userId);
+        List<CartItemVO> cartItems = cartItemMapper.selectCartByUserId(userId);
 
         if (cartItems.isEmpty()) {
             throw new BusinessException("购物车为空");
         }
 
         // 3. 固定库存锁顺序
-        cartItems.sort(
-                Comparator.comparing(
-                        CartItemVO::getDishId
-                )
-        );
+        cartItems.sort(Comparator.comparing(CartItemVO::getDishId));
 
-        BigDecimal totalAmount =
-                BigDecimal.ZERO;
+        BigDecimal totalAmount = BigDecimal.ZERO;
 
         Long restaurantId = null;
 
-        Map<Long, Dish> dishesById =
-                new HashMap<>();
+        Map<Long, Product> dishesById = new HashMap<>();
 
-        // 4. 校验并生成下单快照
+        // 按固定顺序锁商品；锁内读取价格，直到库存扣减和订单快照一起提交。
         for (CartItemVO cartItem : cartItems) {
             if (cartItem.getQuantity() == null || cartItem.getQuantity() < 1)
                 throw new BusinessException("购物车数量不合法");
 
-            Dish dish =
-                    dishMapper.selectById(
-                            cartItem.getDishId()
-                    );
+            Product dish = productMapper.lockById(cartItem.getDishId());
 
             if (dish == null ||
                     dish.getStatus() != 1) {
 
-                throw new BusinessException(
-                        "存在无效或下架菜品"
-                );
+                throw new BusinessException("存在无效或下架商品");
             }
 
             dishesById.put(
@@ -109,45 +96,32 @@ public class OrderService {
 
             if (restaurantId == null) {
 
-                restaurantId =
-                        dish.getRestaurantId();
+                restaurantId = dish.getRestaurantId();
 
             } else if (!restaurantId.equals(
                     dish.getRestaurantId())) {
 
-                throw new BusinessException(
-                        "一次订单只能购买同一家商家的菜品"
-                );
+                throw new BusinessException("一次订单只能购买同一家商家的商品");
             }
 
-            totalAmount =
-                    totalAmount.add(
-                            dish.getPrice().multiply(
-                                    BigDecimal.valueOf(
-                                            cartItem.getQuantity()
-                                    )
-                            )
-                    );
+            totalAmount = totalAmount.add(dish.getPrice().multiply(BigDecimal.valueOf(cartItem.getQuantity())));
         }
 
-        // 先占时段，再按菜品 ID 升序扣库存；任何失败全部回滚。
-        PickupSlot slot = pickupSlotMapper.selectById(pickupSlotId);
-        if (slot == null || !slot.getRestaurantId().equals(restaurantId)
-                || pickupSlotMapper.reserve(pickupSlotId, restaurantId) == 0) {
-            throw new BusinessException("时段不属于该档口、已满或已截止预约");
-        }
+        if (totalAmount.compareTo(new BigDecimal("99999999.99")) > 0)
+            throw new BusinessException("订单金额超出上限");
+        Restaurant merchant = restaurants.selectById(restaurantId);
+        if (merchant == null || merchant.getStatus() != 1) throw new BusinessException("商家已停业");
         // 5. 先写订单，抢占幂等键
         Order order = new Order();
 
         order.setUserId(userId);
         order.setRestaurantId(restaurantId);
         order.setTotalAmount(totalAmount);
-        order.setStatus(
-                OrderStatus.PENDING_PAYMENT.getCode()
-        );
+        order.setStatus(OrderStatus.PENDING_PAYMENT.getCode());
         order.setRequestId(requestId);
-        order.setPickupSlotId(pickupSlotId);
-        order.setPickupCode(UUID.randomUUID().toString().replace("-", ""));
+        order.setShippingAddress(shippingAddress);
+        order.setGoodsAmount(totalAmount);
+        order.setFreightAmount(BigDecimal.ZERO);
 
         try {
 
@@ -155,43 +129,34 @@ public class OrderService {
 
         } catch (DuplicateKeyException e) {
 
-            throw new BusinessException(
-                    "订单正在创建，请勿重复提交"
-            );
+            throw new BusinessException("订单正在创建，请勿重复提交");
         }
 
         // 6. 原子扣库存 + 创建快照
         for (CartItemVO cartItem : cartItems) {
 
-            Dish dish =
-                    dishesById.get(
-                            cartItem.getDishId()
-                    );
+            Product dish = dishesById.get(cartItem.getDishId());
 
             int rows =
-                    dishMapper.decreaseStock(
+                    productMapper.decreaseStock(
                             dish.getId(),
                             cartItem.getQuantity()
                     );
 
             if (rows == 0) {
-                throw new BusinessException(
-                        dish.getName() + "库存不足"
-                );
+                throw new BusinessException(dish.getName() + "库存不足");
             }
 
-            OrderItem orderItem =
-                    new OrderItem();
+            OrderItem orderItem = new OrderItem();
 
             orderItem.setOrderId(order.getId());
             orderItem.setDishId(dish.getId());
             orderItem.setDishName(dish.getName());
             orderItem.setPrice(dish.getPrice());
-            orderItem.setQuantity(
-                    cartItem.getQuantity()
-            );
+            orderItem.setQuantity(cartItem.getQuantity());
 
             orderItemMapper.insert(orderItem);
+            inventory.record(dish.getId(), -cartItem.getQuantity(), "ORDER", String.valueOf(order.getId()));
         }
 
         // 7. 清购物车
@@ -226,49 +191,28 @@ public class OrderService {
     }
     public OrderDetailVO getOrderDetail(Long userId, Long orderId) {
 
-        Order order =
-                orderMapper.selectByIdAndUserId(orderId, userId);
+        Order order = orderMapper.selectByIdAndUserId(orderId, userId);
 
         if (order == null) {
             throw new BusinessException("订单不存在");
         }
 
-        List<OrderItem> items =
-                orderItemMapper.selectByOrderId(orderId);
+        List<OrderItem> items = orderItemMapper.selectByOrderId(orderId);
 
         OrderDetailVO vo = new OrderDetailVO();
 
         vo.setId(order.getId());
-        vo.setPickupSlotId(order.getPickupSlotId());
-        vo.setPickupCode(order.getPickupCode());
         vo.setExpiresAt(order.getExpiresAt());
         vo.setRestaurantId(order.getRestaurantId());
         vo.setTotalAmount(order.getTotalAmount());
+        vo.setGoodsAmount(order.getGoodsAmount());
+        vo.setFreightAmount(order.getFreightAmount());
+        vo.setShippingAddress(order.getShippingAddress());
         vo.setStatus(order.getStatus());
         vo.setCreatedAt(order.getCreatedAt());
         vo.setItems(items);
 
         return vo;
-    }
-
-    public void payOrder(Long userId, Long orderId) {
-
-        int rows = orderMapper.payOrder(
-                orderId,
-                userId,
-                OrderStatus.PENDING_PAYMENT.getCode(),
-                OrderStatus.PAID.getCode()
-        );
-
-        if (rows == 0) {
-            throw new BusinessException("订单不存在或当前状态无法支付");
-        }
-
-        log.info(
-                "订单支付成功, orderId={}, userId={}",
-                orderId,
-                userId
-        );
     }
 
     @Transactional
@@ -293,54 +237,30 @@ public class OrderService {
         );
     }
 
-    public void startPreparing(Long orderId,Long restaurantId) {
-
-        int rows = orderMapper.updateStatusByRestaurant(
-                orderId,
-                restaurantId,
-                OrderStatus.PAID.getCode(),
-                OrderStatus.PREPARING.getCode()
-        );
-
-        if (rows == 0) {
-            throw new BusinessException("订单不存在或当前状态无法开始制作");
-        }
+    @Transactional
+    public void ship(Long orderId, Long restaurantId) {
+        Order order = orderMapper.lockById(orderId);
+        if (order == null || !Objects.equals(order.getRestaurantId(), restaurantId))
+            throw new BusinessException("订单不存在或无权限");
+        if (orderMapper.transition(orderId, 1, 3) != 1) throw new BusinessException("仅已支付订单可发货");
     }
 
-    public void markReady(Long orderId,Long restaurantId) {
-
-        int rows = orderMapper.updateStatusByRestaurant(
-                orderId,
-                restaurantId,
-                OrderStatus.PREPARING.getCode(),
-                OrderStatus.READY_FOR_PICKUP.getCode()
-        );
-
-        if (rows == 0) {
-            throw new BusinessException("订单不存在或当前状态无法标记待取餐");
-        }
-    }
-
-    public void completeOrder(Long orderId, Long restaurantId, String pickupCode) {
-        if (orderMapper.verifyPickup(orderId, restaurantId, pickupCode) == 0)
-            throw new BusinessException("取餐码错误、订单不属于该档口或订单非待取餐状态");
+    @Transactional
+    public void receive(Long orderId, Long userId) {
+        Order order = orderMapper.lockById(orderId);
+        if (order == null || !Objects.equals(order.getUserId(), userId)) throw new BusinessException("订单不存在");
+        if (order.getStatus() == 4) return;
+        if (orderMapper.transition(orderId, 3, 4) != 1) throw new BusinessException("仅已发货订单可确认收货");
     }
 
     private void releaseResources(Long orderId) {
-        releaseSlot(orderId);
         List<OrderItem> items = orderItemMapper.selectByOrderId(orderId);
         items.sort(Comparator.comparing(OrderItem::getDishId));
         for (OrderItem item : items) {
-            if (dishMapper.increaseStock(item.getDishId(), item.getQuantity()) != 1)
+            if (productMapper.increaseStock(item.getDishId(), item.getQuantity()) != 1)
                 throw new BusinessException("恢复库存失败, dishId=" + item.getDishId());
+            inventory.record(item.getDishId(), item.getQuantity(), "CANCEL", String.valueOf(orderId));
         }
-    }
-
-    private void releaseSlot(Long orderId) {
-        Order order = orderMapper.selectById(orderId);
-        // 旧订单没有预约时段，仍允许取消。
-        if (order.getPickupSlotId() != null && pickupSlotMapper.release(order.getPickupSlotId()) != 1)
-            throw new BusinessException("时段名额释放失败");
     }
 
     public PageResult<OrderSummaryVO> getMerchantOrders(
@@ -383,21 +303,20 @@ public class OrderService {
                 );
 
         if (order == null) {
-            throw new BusinessException(
-                    "订单不存在或无权限查看"
-            );
+            throw new BusinessException("订单不存在或无权限查看");
         }
 
-        List<OrderItem> items =
-                orderItemMapper.selectByOrderId(orderId);
+        List<OrderItem> items = orderItemMapper.selectByOrderId(orderId);
 
         OrderDetailVO vo = new OrderDetailVO();
 
         vo.setId(order.getId());
-        vo.setPickupSlotId(order.getPickupSlotId());
         vo.setExpiresAt(order.getExpiresAt());
         vo.setRestaurantId(order.getRestaurantId());
         vo.setTotalAmount(order.getTotalAmount());
+        vo.setGoodsAmount(order.getGoodsAmount());
+        vo.setFreightAmount(order.getFreightAmount());
+        vo.setShippingAddress(order.getShippingAddress());
         vo.setStatus(order.getStatus());
         vo.setCreatedAt(order.getCreatedAt());
         vo.setItems(items);

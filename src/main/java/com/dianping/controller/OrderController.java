@@ -31,7 +31,7 @@ public class OrderController {
         Long orderId =
                 orderService.createOrder(
                         userId,
-                        dto.getRequestId(), dto.getPickupSlotId()
+                        dto.getRequestId(), dto.getShippingAddress()
                 );
 
         return Result.success(orderId);
@@ -59,12 +59,12 @@ public class OrderController {
         );
     }
 
-    @PutMapping("/{id}/pay")
-    public Result<Void> payOrder(
+    @PutMapping("/{id}/receive")
+    public Result<Void> receive(
             @RequestAttribute("userId") Long userId,
             @PathVariable Long id) {
 
-        orderService.payOrder(userId, id);
+        orderService.receive(id, userId);
 
         return Result.success(null);
     }

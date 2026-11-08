@@ -3,10 +3,10 @@ package com.dianping.service;
 import com.dianping.dto.AddCartItemDTO;
 import com.dianping.dto.UpdateCartItemDTO;
 import com.dianping.entity.CartItem;
-import com.dianping.entity.Dish;
+import com.dianping.entity.Product;
 import com.dianping.exception.BusinessException;
 import com.dianping.mapper.CartItemMapper;
-import com.dianping.mapper.DishMapper;
+import com.dianping.mapper.ProductMapper;
 import com.dianping.vo.CartItemVO;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -25,24 +25,24 @@ public class CartService {
 
     private final CartItemMapper cartItemMapper;
 
-    private final DishMapper dishMapper;
+    private final ProductMapper productMapper;
 
     @Transactional
     public void addItem(Long userId, AddCartItemDTO dto) {
         lockCart(userId);
 
-        Dish dish = dishMapper.selectById(dto.getDishId());
+        Product dish = productMapper.selectById(dto.getDishId());
 
         if (dish == null) {
-            throw new BusinessException("菜品不存在");
+            throw new BusinessException("商品不存在");
         }
 
         if (dish.getStatus() != 1) {
-            throw new BusinessException("菜品已下架");
+            throw new BusinessException("商品已下架");
         }
 
         if (dto.getQuantity() == null || dto.getQuantity() < 1 || dto.getQuantity() > dish.getStock())
-            throw new BusinessException("购物车数量超过菜品库存或不合法");
+            throw new BusinessException("购物车数量超过商品库存或不合法");
 
         List<Long> restaurantIds =
                 cartItemMapper.selectRestaurantIdsByUserId(userId);
@@ -56,7 +56,7 @@ public class CartService {
                     dish.getRestaurantId())) {
 
                 throw new BusinessException(
-                        "购物车中已有其他餐厅的菜品，请先清空购物车"
+                        "购物车中已有其他商家的商品，请先清空购物车"
                 );
             }
         }
@@ -81,8 +81,8 @@ public class CartService {
             int newQuantity =
                     cartItem.getQuantity() + dto.getQuantity();
 
-            if (newQuantity > dish.getStock()) {
-                throw new BusinessException("购物车数量超过菜品库存");
+            if (newQuantity < 1 || newQuantity > dish.getStock()) {
+                throw new BusinessException("购物车数量超过商品库存");
             }
             cartItem.setQuantity(newQuantity);
 
@@ -127,26 +127,26 @@ public class CartService {
             );
         }
 
-        Dish dish =
-                dishMapper.selectById(
+        Product dish =
+                productMapper.selectById(
                         cartItem.getDishId()
                 );
 
         if (dish == null) {
             throw new BusinessException(
-                    "菜品不存在"
+                    "商品不存在"
             );
         }
 
         if (dish.getStatus() != 1) {
             throw new BusinessException(
-                    "菜品已下架"
+                    "商品已下架"
             );
         }
 
         if (dto.getQuantity() > dish.getStock()) {
             throw new BusinessException(
-                    "购物车数量超过菜品库存"
+                    "购物车数量超过商品库存"
             );
         }
 

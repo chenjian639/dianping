@@ -27,7 +27,7 @@ public class RestaurantDatabaseService {
                 restaurantMapper.selectById(id);
 
         if (restaurant == null) {
-            throw new BusinessException("餐厅不存在");
+            throw new BusinessException("商家不存在");
         }
 
         RestaurantDetailVO vo =

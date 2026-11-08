@@ -7,7 +7,7 @@ import lombok.Data;
 @Data
 public class AddCartItemDTO {
 
-    @NotNull(message = "菜品ID不能为空")
+    @NotNull(message = "商品ID不能为空")
     private Long dishId;
 
     @NotNull(message = "数量不能为空")

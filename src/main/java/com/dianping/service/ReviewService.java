@@ -69,7 +69,7 @@ public class ReviewService {
             throw new BusinessException("该订单已经评价");
         }
 
-        // 3. 同步维护餐厅评分统计
+        // 3. 同步维护商家评分统计
         int rows =
                 restaurantMapper.addReviewStatistics(
                         order.getRestaurantId(),
@@ -78,7 +78,7 @@ public class ReviewService {
 
         if (rows == 0) {
             throw new BusinessException(
-                    "更新餐厅评分统计失败"
+                    "更新商家评分统计失败"
             );
         }
         outboxEventService.restaurantChanged(order.getRestaurantId());
@@ -123,7 +123,7 @@ public class ReviewService {
             Long restaurantId) {
 
         RestaurantReviewSummaryVO summary = restaurantMapper.selectReviewSummary(restaurantId);
-        if (summary == null) throw new BusinessException(404, "餐厅不存在");
+        if (summary == null) throw new BusinessException(404, "商家不存在");
         return summary;
     }
 

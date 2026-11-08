@@ -6,12 +6,14 @@ import org.apache.ibatis.annotations.*;
 import java.util.List;
 @Mapper
 public interface OrderMapper {
+    @Select("SELECT * FROM orders WHERE id=#{id} FOR UPDATE")
+    Order lockById(Long id);
+
+    @Update("UPDATE orders SET status=#{next} WHERE id=#{id} AND status=#{expected}")
+    int transition(Long id, int expected, int next);
     @Select("SELECT * FROM orders WHERE id = #{id}")
     Order selectById(Long id);
 
-    @Update("UPDATE orders SET status = 4 WHERE id = #{id} " +
-            "AND restaurant_id = #{restaurantId} AND status = 3 AND pickup_code = #{code}")
-    int verifyPickup(Long id, Long restaurantId, String code);
 
 
     @Insert("""
@@ -20,15 +22,14 @@ public interface OrderMapper {
         restaurant_id,
         total_amount,
         status,
-        request_id, pickup_slot_id, pickup_code, expires_at
+        request_id, shipping_address, goods_amount, freight_amount, expires_at
     )
     VALUES(
         #{userId},
         #{restaurantId},
         #{totalAmount},
         #{status},
-        #{requestId}, #{pickupSlotId}, #{pickupCode},
-        LEAST(DATE_ADD(NOW(), INTERVAL 30 MINUTE), (SELECT starts_at FROM pickup_slot WHERE id = #{pickupSlotId}))
+        #{requestId}, #{shippingAddress}, #{goodsAmount}, #{freightAmount}, DATE_ADD(NOW(), INTERVAL 30 MINUTE)
     )
     """)
     @Options(useGeneratedKeys = true, keyProperty = "id")

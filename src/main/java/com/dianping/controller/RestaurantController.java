@@ -2,9 +2,9 @@ package com.dianping.controller;
 
 import com.dianping.common.PageResult;
 import com.dianping.common.Result;
-import com.dianping.entity.Dish;
+import com.dianping.entity.Product;
 import com.dianping.entity.Restaurant;
-import com.dianping.service.DishService;
+import com.dianping.service.ProductService;
 import com.dianping.service.RestaurantService;
 import com.dianping.service.ReviewService;
 import com.dianping.vo.RestaurantDetailVO;
@@ -18,8 +18,8 @@ import org.springframework.web.bind.annotation.*;
 import java.util.List;
 
 @Tag(
-        name = "餐厅接口",
-        description = "餐厅查询、搜索、评价等公共接口"
+        name = "商家接口",
+        description = "商家查询、搜索、评价等公共接口"
 )
 @RestController
 @lombok.RequiredArgsConstructor
@@ -27,7 +27,7 @@ import java.util.List;
 public class RestaurantController {
 
     private final RestaurantService restaurantService;
-    private final DishService dishService;
+    private final ProductService productService;
     private final ReviewService reviewService;
     @GetMapping
     public Result<List<Restaurant>> list() {
@@ -35,8 +35,8 @@ public class RestaurantController {
     }
 
     @Operation(
-            summary = "查询餐厅详情",
-            description = "根据餐厅ID查询基本信息、平均评分和评价数量"
+            summary = "查询商家详情",
+            description = "根据商家ID查询基本信息、平均评分和评价数量"
     )
     @GetMapping("/{id}")
     public Result<RestaurantDetailVO> getRestaurantById(
@@ -47,9 +47,9 @@ public class RestaurantController {
         );
     }
 
-    @GetMapping("/{id}/dishes")
-    public Result<List<Dish>> getDishes(@PathVariable Long id) {
-        return Result.success(dishService.findByRestaurantId(id));
+    @GetMapping("/{id}/products")
+    public Result<List<Product>> getProducts(@PathVariable Long id) {
+        return Result.success(productService.findByRestaurantId(id));
     }
 
     @GetMapping("/{id}/reviews")

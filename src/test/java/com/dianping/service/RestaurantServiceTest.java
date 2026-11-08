@@ -27,8 +27,7 @@ class RestaurantServiceTest {
     @Mock
     private RestaurantDatabaseService restaurantDatabaseService;
 
-    @Mock
-    private RestaurantLocalCacheService restaurantLocalCacheService;
+
 
     @Spy
     private ObjectMapper objectMapper =
@@ -36,21 +35,6 @@ class RestaurantServiceTest {
 
     @InjectMocks
     private RestaurantService restaurantService;
-
-    /**
-     * 让 L1 getOrLoad 直接执行 loader，从而走到 loadRestaurantDetail 内部的 L2/DB 逻辑。
-     */
-    @SuppressWarnings("unchecked")
-    private void stubLocalCacheToLoad(Long id) {
-        when(restaurantLocalCacheService.getOrLoad(
-                eq(id),
-                any(Function.class)
-        )).thenAnswer(inv -> {
-            Function<Long, RestaurantDetailVO> loader =
-                    inv.getArgument(1);
-            return loader.apply(id);
-        });
-    }
 
     @Test
     void getRestaurantDetail_shouldReturnCache_whenRedisHit()
@@ -76,7 +60,7 @@ class RestaurantServiceTest {
                         cachedVO
                 );
 
-        stubLocalCacheToLoad(restaurantId);
+
 
         when(restaurantCacheService.get(
                 "restaurant:detail:1"
@@ -126,7 +110,7 @@ class RestaurantServiceTest {
 
         Long restaurantId = 1L;
 
-        stubLocalCacheToLoad(restaurantId);
+
 
         when(restaurantCacheService.get(
                 "restaurant:detail:1"
@@ -190,7 +174,7 @@ class RestaurantServiceTest {
 
         Long restaurantId = 99999999L;
 
-        stubLocalCacheToLoad(restaurantId);
+
 
         when(restaurantCacheService.get(
                 "restaurant:detail:99999999"
@@ -228,7 +212,7 @@ class RestaurantServiceTest {
 
         Long restaurantId = 99999999L;
 
-        stubLocalCacheToLoad(restaurantId);
+
 
         when(restaurantCacheService.get(
                 "restaurant:detail:99999999"

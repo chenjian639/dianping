@@ -6,40 +6,6 @@ import org.springframework.context.annotation.Configuration;
 
 @Configuration
 public class RabbitMQConfig {
-    public static final String CANTEEN_GEO_QUEUE = "canteen.geo.changed";
-    public static final String CANTEEN_GEO_DLX = "canteen.geo.dlx";
-    public static final String CANTEEN_GEO_DLQ = "canteen.geo.dlq";
-
-    @Bean
-    public Queue canteenGeoQueue() {
-        return QueueBuilder.durable(CANTEEN_GEO_QUEUE)
-                .deadLetterExchange(CANTEEN_GEO_DLX)
-                .deadLetterRoutingKey(CANTEEN_GEO_DLQ).build();
-    }
-
-    @Bean
-    public DirectExchange canteenGeoDlx() {
-        return new DirectExchange(CANTEEN_GEO_DLX);
-    }
-
-    @Bean
-    public Queue canteenGeoDlq() {
-        return QueueBuilder.durable(CANTEEN_GEO_DLQ).build();
-    }
-
-    @Bean
-    public Binding canteenGeoDlqBinding(Queue canteenGeoDlq, DirectExchange canteenGeoDlx) {
-        return BindingBuilder.bind(canteenGeoDlq).to(canteenGeoDlx).with(CANTEEN_GEO_DLQ);
-    }
-
-    public static final String LOCAL_CACHE_EXCHANGE = "restaurant.local-cache.evict";
-    @Bean public FanoutExchange localCacheExchange() { return new FanoutExchange(LOCAL_CACHE_EXCHANGE); }
-    @Bean public AnonymousQueue localCacheQueue() { return new AnonymousQueue(); }
-    @Bean public Binding localCacheBinding(AnonymousQueue localCacheQueue, FanoutExchange localCacheExchange) {
-        return BindingBuilder.bind(localCacheQueue).to(localCacheExchange);
-    }
-
-
     public static final String RESTAURANT_CACHE_EVICT_QUEUE =
             "restaurant.cache.evict";
 

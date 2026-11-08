@@ -5,6 +5,6 @@ import jakarta.validation.constraints.*;
 public class CreateOrderDTO {
     @NotBlank @Size(max = 64)
     private String requestId;
-    @NotNull @Positive
-    private Long pickupSlotId;
+    @NotBlank @Size(max = 500)
+    private String shippingAddress;
 }

@@ -10,10 +10,10 @@ import java.util.concurrent.TimeUnit;
 
 @Slf4j
 @Service
+@lombok.RequiredArgsConstructor
 public class RestaurantCacheService {
 
-    @Autowired
-    private StringRedisTemplate stringRedisTemplate;
+    private final StringRedisTemplate stringRedisTemplate;
 
     @CircuitBreaker(name = "redisCache")
     public String get(String key) {

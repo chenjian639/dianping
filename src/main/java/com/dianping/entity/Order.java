@@ -9,10 +9,6 @@ import java.time.LocalDateTime;
 public class Order {
 
     private Long id;
-    private Long pickupSlotId;
-    @com.fasterxml.jackson.annotation.JsonIgnore
-    @lombok.ToString.Exclude
-    private String pickupCode;
     private LocalDateTime expiresAt;
 
     private Long userId;
@@ -20,6 +16,9 @@ public class Order {
     private Long restaurantId;
 
     private BigDecimal totalAmount;
+    private BigDecimal goodsAmount;
+    private BigDecimal freightAmount;
+    private String shippingAddress;
 
     private Integer status;
 

@@ -22,15 +22,6 @@ public interface RestaurantMapper {
     @Select("SELECT id FROM restaurant WHERE id = #{id} FOR UPDATE")
     Long lockById(Long id);
 
-    @Update("UPDATE restaurant SET canteen_id=#{canteenId} WHERE id=#{id}")
-    int updateCanteen(Long id, Long canteenId);
-
-    @Update("""
-            UPDATE restaurant SET floor=#{floor},window_number=#{windowNumber},
-                pickup_instructions=#{pickupInstructions} WHERE id=#{id}
-            """)
-    int updateLocation(Long id, String floor, String windowNumber, String pickupInstructions);
-
     List<RestaurantSearchVO> searchByKeywordPage(
             String keyword,
             String sort,

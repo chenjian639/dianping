@@ -16,13 +16,9 @@ public class Restaurant {
 
     private String address;
 
-    private Long canteenId;
 
-    private String floor;
 
-    private String windowNumber;
 
-    private String pickupInstructions;
 
     private Integer status;
 

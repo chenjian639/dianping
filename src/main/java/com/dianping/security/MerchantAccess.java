@@ -6,6 +6,6 @@ import com.dianping.exception.BusinessException;
 public final class MerchantAccess {
     private MerchantAccess() {}
     public static void requireRestaurant(Long restaurantId) {
-        if (restaurantId == null) throw new BusinessException(403, "商家未绑定档口");
+        if (restaurantId == null) throw new BusinessException(403, "商家未绑定商家");
     }
 }

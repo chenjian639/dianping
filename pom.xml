@@ -5,27 +5,27 @@
          https://maven.apache.org/xsd/maven-4.0.0.xsd">
     <modelVersion>4.0.0</modelVersion>
 
-    <!-- 1. 引入 Spring Boot 父项目 -->
+
     <parent>
         <groupId>org.springframework.boot</groupId>
         <artifactId>spring-boot-starter-parent</artifactId>
-        <version>3.1.5</version> <!-- 建议使用最新稳定版本 -->
+        <version>3.1.5</version>
         <relativePath/>
     </parent>
 
-    <!-- 2. 设置你的项目坐标 -->
-    <groupId>com.dianping</groupId> <!-- 替换为你的组织名 -->
-    <artifactId>dianping</artifactId> <!-- 替换为你的项目名 -->
+
+    <groupId>com.dianping</groupId>
+    <artifactId>dianping</artifactId>
     <version>0.0.1-SNAPSHOT</version>
-    <name>campus-pickup</name>
-    <description>校园预约取餐与档口产能管理</description>
+    <name>trade-store</name>
+    <description>商品订单、模拟支付与退款</description>
 
     <properties>
         <testcontainers.version>1.21.4</testcontainers.version>
-        <java.version>21</java.version> <!-- 设置你使用的 Java 版本 -->
+        <java.version>21</java.version>
     </properties>
 
-    <!-- 3. 添加 Spring Boot 起步依赖 -->
+
     <dependencies>
         <dependency><groupId>org.flywaydb</groupId><artifactId>flyway-core</artifactId></dependency>
         <dependency><groupId>org.flywaydb</groupId><artifactId>flyway-mysql</artifactId></dependency>
@@ -43,7 +43,7 @@
         <dependency>
             <groupId>org.mybatis.spring.boot</groupId>
             <artifactId>mybatis-spring-boot-starter</artifactId>
-            <!-- 注意：4.0.x 需要更新的 Spring Boot；3.2.5 配 3.0.x 线 -->
+
             <version>3.0.3</version>
         </dependency>
         <dependency>
@@ -63,10 +63,6 @@
             <groupId>io.github.resilience4j</groupId>
             <artifactId>resilience4j-spring-boot3</artifactId>
             <version>2.2.0</version>
-        </dependency>
-        <dependency>
-            <groupId>com.github.ben-manes.caffeine</groupId>
-            <artifactId>caffeine</artifactId>
         </dependency>
         <dependency>
             <groupId>org.projectlombok</groupId>

@@ -25,7 +25,6 @@ public class RestaurantService {
     private final ObjectMapper objectMapper;
     private final OutboxEventService outboxEventService;
     private final RestaurantCacheService restaurantCacheService;
-    private final RestaurantLocalCacheService restaurantLocalCacheService;
     private final RestaurantDatabaseService restaurantDatabaseService;
 
     static final String RESTAURANT_DETAIL_KEY_PREFIX =
@@ -54,10 +53,7 @@ public class RestaurantService {
 
     public RestaurantDetailVO getRestaurantDetail(Long id) {
 
-        return restaurantLocalCacheService.getOrLoad(
-                id,
-                this::loadRestaurantDetail
-        );
+        return loadRestaurantDetail(id);
     }
 
     private RestaurantDetailVO loadRestaurantDetail(Long id) {
@@ -68,7 +64,7 @@ public class RestaurantService {
         boolean redisAvailable = true;
         String json = null;
 
-        // 1. L2 Redis
+        // Redis 只承载展示数据，交易校验不读取此缓存。
         try {
 
             json = restaurantCacheService.get(key);
@@ -78,7 +74,7 @@ public class RestaurantService {
             redisAvailable = false;
 
             log.warn(
-                    "读取餐厅详情Redis缓存失败，降级数据库, restaurantId={}, error={}",
+                    "读取商家详情Redis缓存失败，降级数据库, restaurantId={}, error={}",
                     id,
                     e.getMessage()
             );
@@ -89,7 +85,7 @@ public class RestaurantService {
 
             if (NULL_CACHE_VALUE.equals(json)) {
                 throw new BusinessException(
-                        "餐厅不存在"
+                        "商家不存在"
                 );
             }
 
@@ -103,7 +99,7 @@ public class RestaurantService {
             } catch (JsonProcessingException e) {
 
                 log.warn(
-                        "餐厅详情Redis缓存反序列化失败，降级数据库, restaurantId={}, error={}",
+                        "商家详情Redis缓存反序列化失败，降级数据库, restaurantId={}, error={}",
                         id,
                         e.getMessage()
                 );
@@ -122,7 +118,7 @@ public class RestaurantService {
                 io.github.resilience4j.bulkhead.BulkheadFullException e) {
 
             log.warn(
-                    "餐厅详情数据库回源并发已满, restaurantId={}",
+                    "商家详情数据库回源并发已满, restaurantId={}",
                     id
             );
 
@@ -144,7 +140,7 @@ public class RestaurantService {
                     );
                 } catch (Exception cacheException) {
                     log.warn(
-                            "写入餐厅空值缓存失败, restaurantId={}, error={}",
+                            "写入商家空值缓存失败, restaurantId={}, error={}",
                             id,
                             cacheException.getMessage()
                     );
@@ -176,15 +172,13 @@ public class RestaurantService {
             } catch (Exception e) {
 
                 log.warn(
-                        "回填餐厅详情Redis缓存失败，不影响业务结果, restaurantId={}, error={}",
+                        "回填商家详情Redis缓存失败，不影响业务结果, restaurantId={}, error={}",
                         id,
                         e.getMessage()
                 );
             }
         }
 
-        // 不需要手工 put Caffeine
-        // cache.get(id, loader) 会把这里返回的 vo 自动写入 L1
 
         return vo;
     }
@@ -243,7 +237,7 @@ public class RestaurantService {
 
         } catch (Exception e) {
             log.warn(
-                    "读取餐厅搜索缓存失败，降级查询数据库, cacheKey={}, error={}",
+                    "读取商家搜索缓存失败，降级查询数据库, cacheKey={}, error={}",
                     cacheKey,
                     e.getMessage()
             );
@@ -261,7 +255,7 @@ public class RestaurantService {
                 );
             } catch (JsonProcessingException e) {
                 log.warn(
-                        "餐厅搜索缓存反序列化失败，按缓存未命中处理, cacheKey={}, error={}",
+                        "商家搜索缓存反序列化失败，按缓存未命中处理, cacheKey={}, error={}",
                         cacheKey,
                         e.getMessage()
                 );
@@ -314,7 +308,7 @@ public class RestaurantService {
 
         } catch (Exception e) {
             log.warn(
-                    "写入餐厅搜索缓存失败，不影响本次搜索结果, cacheKey={}, error={}",
+                    "写入商家搜索缓存失败，不影响本次搜索结果, cacheKey={}, error={}",
                     cacheKey,
                     e.getMessage()
             );
@@ -336,7 +330,7 @@ public class RestaurantService {
         );
 
         if (rows == 0) {
-            throw new BusinessException("餐厅不存在");
+            throw new BusinessException("商家不存在");
         }
 
         outboxEventService.restaurantChanged(restaurantId);
@@ -349,7 +343,7 @@ public class RestaurantService {
 
         if (status != 0 && status != 1) {
             throw new BusinessException(
-                    "餐厅状态只能是0或1"
+                    "商家状态只能是0或1"
             );
         }
 
@@ -360,7 +354,7 @@ public class RestaurantService {
 
         if (rows == 0) {
             throw new BusinessException(
-                    "餐厅不存在"
+                    "商家不存在"
             );
         }
 

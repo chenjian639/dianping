@@ -11,11 +11,11 @@ import org.springframework.stereotype.Component;
 public class RestaurantCacheEvictConsumer {
 
     private final StringRedisTemplate stringRedisTemplate;
-    private final org.springframework.amqp.rabbit.core.RabbitTemplate rabbitTemplate;
+
 
     public RestaurantCacheEvictConsumer(
-            StringRedisTemplate stringRedisTemplate, org.springframework.amqp.rabbit.core.RabbitTemplate rabbitTemplate) {
-        this.rabbitTemplate = rabbitTemplate;
+            StringRedisTemplate stringRedisTemplate) {
+
         this.stringRedisTemplate =
                 stringRedisTemplate;
     }
@@ -37,7 +37,7 @@ public class RestaurantCacheEvictConsumer {
 
             Boolean deleted =
                     stringRedisTemplate.delete(key);
-            rabbitTemplate.convertAndSend(RabbitMQConfig.LOCAL_CACHE_EXCHANGE, "", restaurantId);
+
 
             log.info(
                     "缓存补偿删除成功, restaurantId={}, deleted={}",

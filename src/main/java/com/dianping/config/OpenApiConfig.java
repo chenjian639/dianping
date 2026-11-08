@@ -19,9 +19,9 @@ public class OpenApiConfig {
         return new OpenAPI()
                 .info(
                         new Info()
-                                .title("校园预约取餐 API")
-                                .description("档口分时预约、库存与产能管理、模拟支付、凭码核销")
-                                .version("2.0.0")
+                                .title("商品交易 API")
+                                .description("商品、库存、订单、模拟支付、发货与整单退款")
+                                .version("3.0.0")
                 )
                 .addSecurityItem(
                         new SecurityRequirement()

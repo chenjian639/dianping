@@ -1,7 +1,7 @@
 package com.dianping.controller;
 
 import jakarta.validation.Valid;
-import com.dianping.dto.PickupVerificationDTO;
+
 
 import com.dianping.vo.OrderSummaryVO;
 
@@ -40,7 +40,7 @@ public class MerchantOrderController {
             throw new BusinessException("pageSize必须在1到100之间");
         }
 
-        if (status != null && (status < 0 || status > 5)) {
+        if (status != null && (status < 0 || status > 6)) {
             throw new BusinessException("订单状态不合法");
         }
 
@@ -54,42 +54,15 @@ public class MerchantOrderController {
         );
     }
 
-    @PutMapping("/{id}/prepare")
-    public Result<Void> startPreparing(
+    @PutMapping("/{id}/ship")
+    public Result<Void> ship(
             @PathVariable Long id,
             @RequestAttribute(value = "restaurantId", required = false)
             Long restaurantId) {
 
         MerchantAccess.requireRestaurant(restaurantId);
 
-        orderService.startPreparing(id, restaurantId);
-
-        return Result.success(null);
-    }
-
-    @PutMapping("/{id}/ready")
-    public Result<Void> markReady(
-            @PathVariable Long id,
-            @RequestAttribute(value = "restaurantId", required = false)
-            Long restaurantId) {
-
-        MerchantAccess.requireRestaurant(restaurantId);
-
-        orderService.markReady(id, restaurantId);
-
-        return Result.success(null);
-    }
-
-    @PutMapping("/{id}/pickup")
-    public Result<Void> completeOrder(
-            @PathVariable Long id,
-            @Valid @RequestBody PickupVerificationDTO dto,
-            @RequestAttribute(value = "restaurantId", required = false)
-            Long restaurantId) {
-
-        MerchantAccess.requireRestaurant(restaurantId);
-
-        orderService.completeOrder(id, restaurantId, dto.getPickupCode());
+        orderService.ship(id, restaurantId);
 
         return Result.success(null);
     }
