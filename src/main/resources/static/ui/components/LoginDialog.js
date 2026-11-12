@@ -1,7 +1,7 @@
 import { ref, reactive, watch } from '../vendor/vue.esm-browser.prod.js';
 import { api } from '../core/api.js';
 import { loginModal, closeLogin } from '../core/modal.js';
-import { setToken } from '../core/store.js';
+import { setToken, currentRole } from '../core/store.js';
 import { notify } from '../core/notify.js';
 
 // 登录/注册弹窗：注册成功后自动登录（公开注册只创建普通用户）。
@@ -65,6 +65,8 @@ export default {
         const result = await api.login({ username: form.username, password: form.password });
         setToken(result.token);
         closeLogin();
+        if (currentRole() === 'ADMIN') location.hash = '#/admin';
+        else if (currentRole() === 'MERCHANT') location.hash = '#/merchant';
         notify('登录成功');
       } catch (e) {
         error.value = e.message;

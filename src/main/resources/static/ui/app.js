@@ -47,8 +47,8 @@ const App = {
       </header>
       <section id="intro">
         <p class="eyebrow">商品与订单</p>
-        <h1>选购所需商品</h1>
-        <p>浏览商家商品，查看订单与物流状态。</p>
+        <h1>{{ pageTitle }}</h1>
+        <p>{{ pageDescription }}</p>
       </section>
       <div id="notice" role="status" aria-live="polite" :class="{ error: notice.error }">{{ notice.text }}</div>
       <section id="content" :aria-busy="busyText">
@@ -75,7 +75,7 @@ const App = {
         links.push({ name: 'merchant-orders', label: '商家订单' });
         links.push({ name: 'merchant', label: '商家工作台' });
       }
-      if (currentRole() === 'ADMIN') links.push({ name: 'admin', label: '支付演示' });
+      if (currentRole() === 'ADMIN') links.push({ name: 'admin', label: '管理员工作台' });
       return links;
     });
 
@@ -124,9 +124,11 @@ const App = {
       location.hash = '#/browse';
     };
 
+    const pageTitle = computed(() => currentRole() === 'ADMIN' ? '管理员工作台' : currentRole() === 'MERCHANT' ? '商家经营管理' : '选购所需商品');
+    const pageDescription = computed(() => currentRole() === 'ADMIN' ? '查看待付款订单，确认模拟付款。' : currentRole() === 'MERCHANT' ? '管理商品与库存，处理订单和发货。' : '浏览商家商品，查看订单与履约状态。');
     const busyText = 'false';
 
-    return { session, route, notice, navLinks, identity, guardMessage, activeView, viewProps, viewKey, busyText, openLogin, logout };
+    return { pageTitle, pageDescription, session, route, notice, navLinks, identity, guardMessage, activeView, viewProps, viewKey, busyText, openLogin, logout };
   },
 };
 

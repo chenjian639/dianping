@@ -56,6 +56,18 @@ class TradeOrderIT {
     }
     int number(String sql) {return db.queryForObject(sql,Integer.class);}
     Long order() {return orders.createOrder(1L,"request-1","Test address");}
+    @Test void adminPaymentListExcludesClosedExpiredAndConfirmedOrders() {
+        Long id=order();
+        Payment payment=payments.create(1L,id);
+        assertEquals(payment.getId(),payments.pendingForAdmin().get(0).getId());
+        assertEquals(id,payments.pendingForAdmin().get(0).getOrderId());
+        assertEquals("Shop",payments.pendingForAdmin().get(0).getMerchantName());
+        db.update("UPDATE orders SET expires_at=DATE_SUB(NOW(),INTERVAL 1 SECOND) WHERE id=?",id);
+        assertTrue(payments.pendingForAdmin().isEmpty());
+        db.update("UPDATE orders SET expires_at=DATE_ADD(NOW(),INTERVAL 10 MINUTE) WHERE id=?",id);
+        payments.callback(payment.getId(),"admin-demo",payment.getAmount());
+        assertTrue(payments.pendingForAdmin().isEmpty());
+    }
     Payment paid(Long id) {
         Payment p=payments.create(1L,id);
         payments.callback(p.getId(),"channel-"+p.getId(),p.getAmount());

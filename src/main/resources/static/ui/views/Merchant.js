@@ -172,7 +172,7 @@ export default {
         ],
         onSubmit: async values => {
           await api.updateRestaurant(values);
-          if (restaurantId()) state.restaurant = await api.restaurant(restaurantId());
+          state.restaurant = { ...current, ...values };
           notify('操作成功');
         },
       });
@@ -183,7 +183,7 @@ export default {
       state.busy = true;
       try {
         await api.updateRestaurantStatus(next);
-        if (restaurantId()) state.restaurant = await api.restaurant(restaurantId());
+        state.restaurant = { ...state.restaurant, status: next };
         notify(next ? '已恢复营业' : '已暂停营业');
       } catch (e) {
         notify(e.message, true);

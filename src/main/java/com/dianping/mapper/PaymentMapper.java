@@ -3,6 +3,14 @@ import com.dianping.entity.Payment;
 import org.apache.ibatis.annotations.*;
 @Mapper
 public interface PaymentMapper {
+    @Select("""
+        SELECT p.id,p.order_id,p.amount,u.nickname AS buyer_name,r.name AS merchant_name
+        FROM payment p JOIN orders o ON o.id=p.order_id
+        JOIN user u ON u.id=o.user_id JOIN restaurant r ON r.id=o.restaurant_id
+        WHERE p.status='PENDING' AND o.status=0 AND o.expires_at>NOW()
+        ORDER BY p.id DESC LIMIT 100
+        """)
+    java.util.List<com.dianping.vo.AdminPaymentVO> pendingForAdmin();
     // 必须使用当前读，不能复用等待订单锁之前建立的可重复读快照。
     @Select("SELECT * FROM payment WHERE order_id=#{orderId} FOR UPDATE")
     Payment byOrder(Long orderId);

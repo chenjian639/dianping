@@ -12,6 +12,9 @@ import java.util.*;
 @Service
 @RequiredArgsConstructor
 public class PaymentService {
+    public List<com.dianping.vo.AdminPaymentVO> pendingForAdmin() {
+        return payments.pendingForAdmin();
+    }
     private final OrderMapper orders;
     private final PaymentMapper payments;
     private final OrderItemMapper items;

@@ -10,6 +10,10 @@ import java.math.BigDecimal;
 @RestController
 @RequiredArgsConstructor
 public class PaymentController {
+    @GetMapping("/admin/mock-payments")
+    public Result<java.util.List<com.dianping.vo.AdminPaymentVO>> pending() {
+        return Result.success(service.pendingForAdmin());
+    }
     private final PaymentService service;
     public record Callback(@NotBlank @Size(max=64) String channelReference,
                            @NotNull @DecimalMin("0.01") @Digits(integer=8,fraction=2) BigDecimal amount) {}

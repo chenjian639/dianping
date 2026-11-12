@@ -70,6 +70,7 @@ export const api = {
   refundOrder: orderId => request('/orders/' + orderId + '/refund', { method: 'POST' }),
   mockPaymentCallback: (id, body) =>
     request('/admin/mock-payments/' + id + '/callback', { method: 'POST', body }),
+  pendingPayments: () => request('/admin/mock-payments'),
 
   // 商家工作台：订单
   merchantOrders: (page, pageSize, status) => request('/merchant/orders' + query({ page, pageSize, status })),
