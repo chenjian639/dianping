@@ -13,8 +13,10 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import java.util.List;
+import java.util.UUID;
 import java.util.concurrent.ThreadLocalRandom;
 import java.util.concurrent.TimeUnit;
+import java.util.function.Supplier;
 
 @Slf4j
 @Service
@@ -36,6 +38,20 @@ public class MerchantService {
             "merchant:search:";
 
     private static final long SEARCH_CACHE_TTL_MINUTES = 2;
+
+    /**
+     * 重建锁TTL需大于一次DB回源+回填耗时；
+     * 持锁线程宕机后锁自动过期，不会死锁。
+     */
+    private static final long REBUILD_LOCK_TTL_SECONDS = 10;
+
+    /**
+     * 未抢到锁的线程轮询等待新缓存，最长约1秒；
+     * 超时后降级直接回源，详情回源仍受Bulkhead并发上限保护。
+     */
+    private static final long REBUILD_WAIT_INTERVAL_MILLIS = 100;
+
+    private static final int REBUILD_WAIT_ATTEMPTS = 10;
 
     public List<Merchant> findAll() {
         return merchantMapper.selectAll();
@@ -61,52 +77,73 @@ public class MerchantService {
         String key =
                 MERCHANT_DETAIL_KEY_PREFIX + id;
 
-        boolean redisAvailable = true;
-        String json = null;
-
         // Redis 只承载展示数据，交易校验不读取此缓存。
+        // 未命中时走互斥锁重建，防止热点key失效瞬间击穿DB。
+        return loadWithRebuildLock(
+                key,
+                () -> readDetailCache(key),
+                () -> loadDetailFromDatabase(id, key)
+        );
+    }
+
+    private MerchantDetailVO readDetailCache(String key) {
+
+        String json;
+
         try {
 
             json = merchantCacheService.get(key);
 
         } catch (Exception e) {
 
-            redisAvailable = false;
-
             log.warn(
-                    "读取商家详情Redis缓存失败，降级数据库, merchantId={}, error={}",
-                    id,
+                    "读取商家详情Redis缓存失败，降级数据库, key={}, error={}",
+                    key,
                     e.getMessage()
             );
+
+            return null;
         }
 
-        // 2. Redis HIT
-        if (json != null) {
+        return parseDetailCache(key, json);
+    }
 
-            if (NULL_CACHE_VALUE.equals(json)) {
-                throw new BusinessException(
-                        "商家不存在"
-                );
-            }
+    private MerchantDetailVO parseDetailCache(
+            String key,
+            String json) {
 
-            try {
-
-                return objectMapper.readValue(
-                        json,
-                        MerchantDetailVO.class
-                );
-
-            } catch (JsonProcessingException e) {
-
-                log.warn(
-                        "商家详情Redis缓存反序列化失败，降级数据库, merchantId={}, error={}",
-                        id,
-                        e.getMessage()
-                );
-            }
+        if (json == null) {
+            return null;
         }
 
-        // 3. Redis MISS / Redis故障 → DB
+        // 空值缓存命中：DB中确实不存在，防穿透
+        if (NULL_CACHE_VALUE.equals(json)) {
+            throw new BusinessException("商家不存在");
+        }
+
+        try {
+
+            return objectMapper.readValue(
+                    json,
+                    MerchantDetailVO.class
+            );
+
+        } catch (JsonProcessingException e) {
+
+            log.warn(
+                    "商家详情Redis缓存反序列化失败，按未命中处理, key={}, error={}",
+                    key,
+                    e.getMessage()
+            );
+
+            return null;
+        }
+    }
+
+    private MerchantDetailVO loadDetailFromDatabase(
+            Long id,
+            String key) {
+
         MerchantDetailVO vo;
 
         try {
@@ -128,59 +165,166 @@ public class MerchantService {
 
         } catch (BusinessException e) {
 
-            // DB中确实不存在
-            if (redisAvailable) {
+            // DB中确实不存在，写入空值缓存防穿透
+            try {
 
-                try {
-                    merchantCacheService.set(
-                            key,
-                            NULL_CACHE_VALUE,
-                            5,
-                            TimeUnit.MINUTES
-                    );
-                } catch (Exception cacheException) {
-                    log.warn(
-                            "写入商家空值缓存失败, merchantId={}, error={}",
-                            id,
-                            cacheException.getMessage()
-                    );
-                }
+                merchantCacheService.set(
+                        key,
+                        NULL_CACHE_VALUE,
+                        5,
+                        TimeUnit.MINUTES
+                );
+
+            } catch (Exception cacheException) {
+                log.warn(
+                        "写入商家空值缓存失败, merchantId={}, error={}",
+                        id,
+                        cacheException.getMessage()
+                );
             }
 
             throw e;
         }
 
-        // 4. 回填 Redis
-        if (redisAvailable) {
+        // 回填 Redis，TTL随机30~40分钟防雪崩
+        try {
+
+            String value =
+                    objectMapper.writeValueAsString(vo);
+
+            long ttlMinutes =
+                    30 + ThreadLocalRandom.current()
+                            .nextLong(0, 11);
+
+            merchantCacheService.set(
+                    key,
+                    value,
+                    ttlMinutes,
+                    TimeUnit.MINUTES
+            );
+
+        } catch (Exception e) {
+
+            log.warn(
+                    "回填商家详情Redis缓存失败，不影响业务结果, merchantId={}, error={}",
+                    id,
+                    e.getMessage()
+            );
+        }
+
+        return vo;
+    }
+
+    /**
+     * 缓存未命中时用SET NX互斥锁重建，防止缓存击穿：
+     * 1. 抢到锁的线程先double-check缓存，再回源DB并回填；
+     * 2. 未抢到锁的线程短暂轮询等待读新缓存；
+     * 3. 等待超时或Redis不可用时降级直接回源。
+     */
+    private <T> T loadWithRebuildLock(
+            String key,
+            Supplier<T> cacheReader,
+            Supplier<T> databaseLoader) {
+
+        T cached = cacheReader.get();
+
+        if (cached != null) {
+            return cached;
+        }
+
+        String lockKey = key + ":lock";
+        String owner = UUID.randomUUID().toString();
+
+        boolean locked = false;
+
+        try {
+
+            locked = merchantCacheService.tryLock(
+                    lockKey,
+                    owner,
+                    REBUILD_LOCK_TTL_SECONDS,
+                    TimeUnit.SECONDS
+            );
+
+        } catch (Exception e) {
+
+            log.warn(
+                    "获取缓存重建锁失败，降级直接回源数据库, key={}, error={}",
+                    key,
+                    e.getMessage()
+            );
+
+            return databaseLoader.get();
+        }
+
+        if (!locked) {
+            return waitForRebuild(
+                    lockKey,
+                    cacheReader,
+                    databaseLoader
+            );
+        }
+
+        try {
+
+            // double-check：抢锁期间可能已被上一个持锁线程回填
+            cached = cacheReader.get();
+
+            if (cached != null) {
+                return cached;
+            }
+
+            return databaseLoader.get();
+
+        } finally {
+            releaseLockQuietly(lockKey, owner);
+        }
+    }
+
+    private <T> T waitForRebuild(
+            String lockKey,
+            Supplier<T> cacheReader,
+            Supplier<T> databaseLoader) {
+
+        for (int attempt = 0;
+                attempt < REBUILD_WAIT_ATTEMPTS;
+                attempt++) {
 
             try {
+                Thread.sleep(REBUILD_WAIT_INTERVAL_MILLIS);
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+                break;
+            }
 
-                String value =
-                        objectMapper.writeValueAsString(vo);
+            T cached = cacheReader.get();
 
-                long ttlMinutes =
-                        30 + ThreadLocalRandom.current()
-                                .nextLong(0, 11);
-
-                merchantCacheService.set(
-                        key,
-                        value,
-                        ttlMinutes,
-                        TimeUnit.MINUTES
-                );
-
-            } catch (Exception e) {
-
-                log.warn(
-                        "回填商家详情Redis缓存失败，不影响业务结果, merchantId={}, error={}",
-                        id,
-                        e.getMessage()
-                );
+            if (cached != null) {
+                return cached;
             }
         }
 
+        log.warn(
+                "等待缓存重建超时，降级直接回源数据库, lockKey={}",
+                lockKey
+        );
 
-        return vo;
+        return databaseLoader.get();
+    }
+
+    private void releaseLockQuietly(
+            String lockKey,
+            String owner) {
+
+        try {
+            merchantCacheService.unlock(lockKey, owner);
+        } catch (Exception e) {
+            log.warn(
+                    "释放缓存重建锁失败，锁将随TTL自动过期, lockKey={}, error={}",
+                    lockKey,
+                    e.getMessage()
+            );
+        }
     }
 
     public PageResult<MerchantSearchVO> searchMerchants(
@@ -199,19 +343,18 @@ public class MerchantService {
             );
         }
 
-        if (keyword == null) {
-            keyword = "";
-        }
+        // 规范化后不再重新赋值，保证lambda可捕获
+        String effectiveKeyword =
+                keyword == null ? "" : keyword.trim();
 
-        keyword = keyword.trim();
+        String effectiveSort =
+                sort == null || sort.isBlank()
+                        ? "latest"
+                        : sort;
 
-        if (sort == null || sort.isBlank()) {
-            sort = "latest";
-        }
-
-        if (!sort.equals("latest")
-                && !sort.equals("rating")
-                && !sort.equals("reviews")) {
+        if (!effectiveSort.equals("latest")
+                && !effectiveSort.equals("rating")
+                && !effectiveSort.equals("reviews")) {
 
             throw new BusinessException(
                     "sort只能是latest、rating或reviews"
@@ -221,18 +364,36 @@ public class MerchantService {
         // 1. 生成缓存 key
         String cacheKey =
                 MERCHANT_SEARCH_KEY_PREFIX
-                        + keyword
+                        + effectiveKeyword
                         + ":"
-                        + sort
+                        + effectiveSort
                         + ":"
                         + page
                         + ":"
                         + pageSize;
 
-        // 2. 先查 Redis
-        String cached = null;
+        // 2. 搜索缓存同样走互斥锁重建，
+        //    防止热门关键词缓存失效瞬间集中回源DB
+        return loadWithRebuildLock(
+                cacheKey,
+                () -> readSearchCache(cacheKey),
+                () -> searchFromDatabase(
+                        cacheKey,
+                        effectiveKeyword,
+                        effectiveSort,
+                        page,
+                        pageSize
+                )
+        );
+    }
+
+    private PageResult<MerchantSearchVO> readSearchCache(
+            String cacheKey) {
+
+        String cached;
 
         try {
+
             cached = merchantCacheService.get(cacheKey);
 
         } catch (Exception e) {
@@ -241,28 +402,45 @@ public class MerchantService {
                     cacheKey,
                     e.getMessage()
             );
-        }
-        if (cached != null) {
-            try {
-                return objectMapper.readValue(
-                        cached,
-                        objectMapper
-                                .getTypeFactory()
-                                .constructParametricType(
-                                        PageResult.class,
-                                        MerchantSearchVO.class
-                                )
-                );
-            } catch (JsonProcessingException e) {
-                log.warn(
-                        "商家搜索缓存反序列化失败，按缓存未命中处理, cacheKey={}, error={}",
-                        cacheKey,
-                        e.getMessage()
-                );
-            }
+
+            return null;
         }
 
-        // 3. Redis 未命中，再查 MySQL
+        if (cached == null) {
+            return null;
+        }
+
+        try {
+
+            return objectMapper.readValue(
+                    cached,
+                    objectMapper
+                            .getTypeFactory()
+                            .constructParametricType(
+                                    PageResult.class,
+                                    MerchantSearchVO.class
+                            )
+            );
+
+        } catch (Exception e) {
+            log.warn(
+                    "商家搜索缓存反序列化失败，按缓存未命中处理, cacheKey={}, error={}",
+                    cacheKey,
+                    e.getMessage()
+            );
+
+            return null;
+        }
+    }
+
+    private PageResult<MerchantSearchVO> searchFromDatabase(
+            String cacheKey,
+            String keyword,
+            String sort,
+            int page,
+            int pageSize) {
+
+        // Redis 未命中，再查 MySQL
         int offset = (page - 1) * pageSize;
 
         int querySize = pageSize + 1;
@@ -293,7 +471,7 @@ public class MerchantService {
         result.setHasNext(hasNext);
         result.setRecords(records);
 
-        // 4. 写入 Redis
+        // 写入 Redis，TTL 2分钟
 
         try {
             String json =

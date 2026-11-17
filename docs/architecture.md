@@ -79,6 +79,7 @@ Nginx → Spring Security JWT → Controller → Service → MyBatis → MySQL
 ## 缓存和消息边界
 
 - 无本地缓存。商家详情Redis TTL随机30～40分钟，空值5分钟；搜索缓存2分钟。商品列表直接查询数据库，交易不信任缓存。
+- 详情与搜索缓存未命中时先抢SET NX互斥锁（TTL 10秒，持锁者double-check后回源并回填，其余请求轮询约1秒读新缓存，超时降级直接回源），防止热点key失效瞬间击穿DB；持锁线程宕机后锁自动过期，解锁用Lua比对持有者，不误删他人锁。
 - Redis故障时详情受Bulkhead保护回源；搜索查询不经过该详情Bulkhead，不能宣称全站回源均限流。
 - 商家变更在事务内写Outbox，消费者删除Redis，失败经重试/死信处理。读后回填仍可能写入旧值，属于最终一致性，不保证严格实时。
 - Outbox每批抢占事件，等待publisher confirm并检查return；成功标记SENT，失败重试，达到上限标记FAILED，恢复超时PROCESSING。
