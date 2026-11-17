@@ -1,6 +1,6 @@
 import { reactive } from '../vendor/vue.esm-browser.prod.js';
 
-// hash 路由：#/browse、#/stall/{id}、#/cart、#/orders、#/merchant-orders、#/merchant、#/admin
+// hash 路由：#/browse、#/shop/{id}、#/cart、#/orders、#/merchant-orders、#/merchant、#/admin
 export const route = reactive({ name: 'browse', params: {} });
 
 const PUBLIC_VIEWS = new Set(['browse']);
@@ -10,7 +10,7 @@ export function parseHash() {
   const [rawName, ...rest] = hash.split('/').filter(Boolean);
   const name = rawName || 'browse';
   const params = {};
-  if (name === 'stall' && rest[0]) params.id = rest[0];
+  if (name === 'shop' && rest[0]) params.id = rest[0];
   route.name = name;
   route.params = params;
 }

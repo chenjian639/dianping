@@ -60,8 +60,8 @@ springdoc:
 logging:
   level:
     root: INFO
-    com.dianping: INFO
-    com.dianping.exception.GlobalExceptionHandler: DEBUG
+    com.trade: INFO
+    com.trade.exception.GlobalExceptionHandler: DEBUG
 
 management:
   endpoint:
@@ -81,7 +81,7 @@ management:
 resilience4j:
   bulkhead:
     instances:
-      restaurantDb:
+      merchantDb:
         max-concurrent-calls: 20
         max-wait-duration: 0ms
   circuitbreaker:
@@ -94,3 +94,13 @@ resilience4j:
         wait-duration-in-open-state: 10s
         permitted-number-of-calls-in-half-open-state: 2
         automatic-transition-from-open-to-half-open-enabled: true
+
+payment:
+  alipay:
+    app-id: ${ALIPAY_APP_ID:}
+    seller-id: ${ALIPAY_SELLER_ID:}
+    private-key: ${ALIPAY_PRIVATE_KEY:}
+    public-key: ${ALIPAY_PUBLIC_KEY:}
+    notify-url: ${ALIPAY_NOTIFY_URL:}
+    return-url: ${ALIPAY_RETURN_URL:}
+    gateway: ${ALIPAY_GATEWAY:https://openapi.alipay.com/gateway.do}

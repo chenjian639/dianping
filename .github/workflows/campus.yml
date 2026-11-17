@@ -66,7 +66,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: campus-jar
-          path: target/dianping-0.0.1-SNAPSHOT.jar
+          path: target/trade-store-0.0.1-SNAPSHOT.jar
           if-no-files-found: error
 
       - name: Stop isolated test containers
@@ -113,12 +113,12 @@ jobs:
           RELEASE_ID: ${{ github.run_id }}-${{ github.run_attempt }}
           COMMIT_SHA: ${{ github.sha }}
         run: |
-          test -s target/dianping-0.0.1-SNAPSHOT.jar
+          test -s target/trade-store-0.0.1-SNAPSHOT.jar
           mkdir -p "$RUNNER_TEMP/release/target" "$RUNNER_TEMP/release/docker/nginx" "$RUNNER_TEMP/release/scripts"
           cp Dockerfile .dockerignore compose.server.yml "$RUNNER_TEMP/release/"
           cp docker/nginx/server.conf "$RUNNER_TEMP/release/docker/nginx/"
           cp scripts/deploy_server.sh "$RUNNER_TEMP/release/scripts/"
-          cp target/dianping-0.0.1-SNAPSHOT.jar "$RUNNER_TEMP/release/target/"
+          cp target/trade-store-0.0.1-SNAPSHOT.jar "$RUNNER_TEMP/release/target/"
           [[ "$COMMIT_SHA" =~ ^[0-9a-f]{40}$ ]]
           [[ "$RELEASE_ID" =~ ^[0-9]+-[0-9]+$ ]]
           command -v rsync
@@ -139,11 +139,11 @@ jobs:
             then uploaded=true; break; fi
           done
           "$uploaded" || { echo 'Upload incomplete; partial blocks retained. Deployment not started.'; exit 1; }
-          JAR_SHA="$(sha256sum target/dianping-0.0.1-SNAPSHOT.jar | cut -d ' ' -f1)"
+          JAR_SHA="$(sha256sum target/trade-store-0.0.1-SNAPSHOT.jar | cut -d ' ' -f1)"
           "${SSH[@]}" "$DEST" bash -se -- "$UPLOAD" "$RELEASE_ID" "$JAR_SHA" <<'REMOTE'
           set -euo pipefail
           cd "$HOME"
-          printf '%s  %s/target/dianping-0.0.1-SNAPSHOT.jar\n' "$3" "$1" | sha256sum -c -
+          printf '%s  %s/target/trade-store-0.0.1-SNAPSHOT.jar\n' "$3" "$1" | sha256sum -c -
           tar --exclude='.rsync-partial' -czf "campus-deploy/incoming/$2.tgz.part" -C "$1" .
           mv "campus-deploy/incoming/$2.tgz.part" "campus-deploy/incoming/$2.tgz"
           REMOTE

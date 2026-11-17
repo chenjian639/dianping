@@ -1,0 +1,11 @@
+package com.trade.security;
+
+import com.trade.exception.BusinessException;
+
+/** Role authorization is in SecurityConfig; this checks the merchant's resource binding. */
+public final class MerchantAccess {
+    private MerchantAccess() {}
+    public static void requireMerchant(Long merchantId) {
+        if (merchantId == null) throw new BusinessException(403, "商家未绑定商家");
+    }
+}

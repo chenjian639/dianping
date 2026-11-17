@@ -1,4 +1,4 @@
-import { reactive, onMounted } from '../vendor/vue.esm-browser.prod.js';
+import { reactive, onMounted, computed } from '../vendor/vue.esm-browser.prod.js';
 import { api } from '../core/api.js';
 import { notify } from '../core/notify.js';
 import { navigate } from '../core/router.js';
@@ -15,7 +15,7 @@ export default {
       <template v-else>
         <div v-for="item in items" :key="item.id" class="row">
           <div>
-            <h3>{{ item.dishName }}</h3>
+            <h3>{{ item.productName }}</h3>
             <p>{{ money(item.price) }} × {{ item.quantity }}</p>
           </div>
           <div class="actions">
@@ -44,7 +44,7 @@ export default {
     const editQuantity = item => {
       openForm({
         title: '修改数量',
-        fields: [{ name: 'quantity', label: '份数', type: 'number', value: item.quantity, attrs: { min: 1, required: true } }],
+        fields: [{ name: 'quantity', label: '数量', type: 'number', value: item.quantity, attrs: { min: 1, required: true } }],
         submitLabel: '保存',
         onSubmit: async values => {
           await api.updateCartItem(item.id, Number(values.quantity));
@@ -85,7 +85,7 @@ export default {
       });
     };
 
-    const total = () => state.items.reduce((sum, item) => sum + Number(item.price) * item.quantity, 0);
+    const total = computed(() => state.items.reduce((sum, item) => sum + Number(item.price) * item.quantity, 0));
 
     onMounted(load);
     return { ...toRefs(state), money, editQuantity, remove, checkout, total };

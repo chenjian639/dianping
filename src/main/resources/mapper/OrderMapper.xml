@@ -3,13 +3,13 @@
         PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
         "https://mybatis.org/dtd/mybatis-3-mapper.dtd">
 
-<mapper namespace="com.dianping.mapper.OrderMapper">
+<mapper namespace="com.trade.mapper.OrderMapper">
 
     <select id="selectMerchantOrdersPage"
-            resultType="com.dianping.entity.Order">
+            resultType="com.trade.entity.Order">
         SELECT *
         FROM orders
-        WHERE restaurant_id = #{restaurantId}
+        WHERE merchant_id = #{merchantId}
 
         <if test="status != null">
             AND status = #{status}
@@ -24,7 +24,7 @@
             resultType="java.lang.Long">
         SELECT COUNT(*)
         FROM orders
-        WHERE restaurant_id = #{restaurantId}
+        WHERE merchant_id = #{merchantId}
 
         <if test="status != null">
             AND status = #{status}

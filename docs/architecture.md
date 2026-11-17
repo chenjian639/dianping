@@ -12,7 +12,7 @@ Nginx → Spring Security JWT → Controller → Service → MyBatis → MySQL
                                                                           └→ Redis缓存删除
 ```
 
-这是单模块单体，可部署多个实例共享MySQL、Redis、RabbitMQ。无需跨服务事务。业务类位于 `src/main/java/com/dianping/`。
+这是单模块单体，可部署多个实例共享MySQL、Redis、RabbitMQ。本地数据使用数据库事务，支付宝资金操作通过幂等请求与恢复任务协调。业务类位于 `src/main/java/com/trade/`。
 
 | 模块 | 主要实现 | 职责 |
 |---|---|---|
@@ -23,20 +23,20 @@ Nginx → Spring Security JWT → Controller → Service → MyBatis → MySQL
 | 支付退款 | PaymentService、PaymentMapper | 支付单、回调金额校验、发货前整单退款 |
 | 库存 | InventoryService、InventoryMapper | 幂等增减、库存变更流水 |
 | 消息 | OutboxEventService、OutboxPublisherService、mq/ | 事务事件、发布确认、重试与消费者 |
-| 展示缓存 | RestaurantService、RestaurantCacheService、RestaurantDatabaseService | Redis cache-aside、空值缓存、回源隔离 |
+| 展示缓存 | MerchantService、MerchantCacheService、MerchantDatabaseService | Redis cache-aside、空值缓存、回源隔离 |
 | 评价 | ReviewService | 已完成订单评价和商家评分统计，保留兼容功能 |
 
 ## 数据模型
 
 | 表 | 关键关系和约束 |
 |---|---|
-| user | 用户名、手机号唯一；商家账号通过restaurant_id绑定商家 |
-| restaurant | 商家资料、营业状态、评分统计 |
-| dish | 当前商品；历史表名保留，Java实体已为Product |
-| cart_item | (user_id,dish_id)唯一；商品数量 |
+| user | 用户名、手机号唯一；商家账号通过merchant_id绑定商家 |
+| merchant | 商家资料、营业状态、评分统计 |
+| product | 商品资料、价格及库存 |
+| cart_item | (user_id,product_id)唯一；商品数量 |
 | orders | (user_id,request_id)唯一；状态、地址、goods_amount、freight_amount、total_amount、expires_at |
 | order_item | 商品名称、单价、数量的订单快照 |
-| payment | order_id唯一、channel_reference唯一；一个订单一个模拟支付单 |
+| payment | order_id唯一、channel_reference唯一；一个订单一个支付单，channel 标识真实或历史渠道 |
 | refund | order_id唯一；一个订单最多一次整单退款 |
 | inventory_movement | (product_id,reason,business_key)唯一；期初、下单、取消、退款、人工调整 |
 | outbox_event | event_id唯一；PENDING/PROCESSING/SENT/FAILED |
@@ -49,10 +49,10 @@ Nginx → Spring Security JWT → Controller → Service → MyBatis → MySQL
 ```text
 0待支付 → 1已支付 → 3已发货 → 4已完成
    └→ 5已取消         
-          1已支付 → 6已退款
+          1已支付 → 7退款处理中 → 6已退款
 ```
 
-2是旧制作中状态，新业务不产生。支付单状态为PENDING、SUCCEEDED、REFUNDED；退款当前同步成功，不存在真实渠道处理中状态。
+2是旧制作中状态，新业务不产生。支付单状态为PENDING、SUCCEEDED、REFUNDED；订单状态 7 持久化保存退款处理中，禁止发货并允许恢复任务重试。
 
 ### 下单事务
 
@@ -69,9 +69,9 @@ Nginx → Spring Security JWT → Controller → Service → MyBatis → MySQL
 
 - 支付回调先定位订单，再锁订单、当前读锁支付单。金额与渠道流水匹配的重复回调不重复支付。
 - 锁内支付查询使用 `FOR UPDATE`，避免等待订单锁前建立的可重复读快照继续返回PENDING。
-- 支付更新检查待支付状态和 `expires_at > NOW()`；超时更新检查 `expires_at <= NOW()`，统一以数据库时间裁决。
+- 创建支付链接检查待支付状态和数据库截止时间；通知允许晚到，取消先核对渠道状态。
 - 取消/超时成功切换订单状态后才恢复库存。恢复失败回滚状态，因此可以重试；重复超时属于正常无操作。
-- 发货和退款竞争订单锁。发货只允许1→3；退款只允许1→6，并在同一事务更新支付、写退款单、恢复库存和写流水。
+- 发货和退款竞争订单锁。发货只允许1→3；退款先持久化1→7，再以固定退款请求号调用支付宝，确认后事务提交7→6和库存恢复。
 - 买家只能确认自己的已发货订单收货。已收货重复确认成功返回；重复发货/取消会返回业务错误。
 
 锁顺序：下单为用户→商品ID升序；退款为订单→支付→商品ID升序；取消为订单→商品ID升序；人工调整只锁商品。库存流水唯一键是审计与去重约束，不能替代订单状态竞争。
@@ -83,13 +83,13 @@ Nginx → Spring Security JWT → Controller → Service → MyBatis → MySQL
 - 商家变更在事务内写Outbox，消费者删除Redis，失败经重试/死信处理。读后回填仍可能写入旧值，属于最终一致性，不保证严格实时。
 - Outbox每批抢占事件，等待publisher confirm并检查return；成功标记SENT，失败重试，达到上限标记FAILED，恢复超时PROCESSING。
 - 确认后、标记SENT前宕机会重复投递，因此消费者依靠订单状态条件更新或重复删除实现幂等。不是“消息只发一次”。
-- 30分钟延迟队列触发超时检查，每60秒扫描到期订单兜底。库存释放可能延后；截止之后支付仍由SQL拒绝。
+- 30分钟延迟队列触发超时检查，每60秒扫描到期订单兜底。库存释放可能延后；已支付交易会同步为已支付，不释放库存。
 - SchedulingConfig分离投递线程与恢复线程，防止MQ确认等待阻塞关单扫描。FAILED事件仍需排查，不承诺永久自动重试。
 
-## 鉴权与模拟支付边界
+## 鉴权与支付边界
 
-Spring Security无状态JWT，USER/MERCHANT/ADMIN角色；资源归属由服务/SQL继续校验。JWT有效期24小时，不具备Campus Share的Redis会话版本与即时撤销能力。
-模拟回调位于ADMIN路径，普通买家不能直接指定金额支付。没有渠道签名、外部扣款、真实退款或资金对账。接真实支付需增加签名验证、渠道查询、退款处理中状态和晚到成功付款的补偿；本地事务不能包住外部资金操作。
+JWT 区分 USER/MERCHANT/ADMIN，服务层检查资源归属。支付通知无需 JWT，但必须校验 RSA2 签名、应用和商户身份、金额、渠道流水。
+没有管理员代付款入口。支付宝配置、关单与退款恢复边界见 [支付宝接入](alipay.md)。
 
 ## 运行、配置与迁移
 
@@ -97,6 +97,6 @@ Spring Security无状态JWT，USER/MERCHANT/ADMIN角色；资源归属由服务/
 - 服务器：`compose.server.yml`；`scripts/init_server_env.py`初始化环境，`scripts/deploy_server.sh`由CI调用负责备份及发布，`scripts/audit_server.sh`用于只读审计。保留这些活跃脚本，不在文档清理时破坏发布链路。
 - 主要环境变量：SPRING_DATASOURCE_URL/USERNAME/PASSWORD、SPRING_DATA_REDIS_HOST/PORT、RABBITMQ_HOST/USERNAME/PASSWORD、JWT_SECRET。服务器具体映射以Compose为准。
 - 配置源：`src/main/resources/application.yml`；迁移唯一来源：`src/main/resources/db/migration/`。
-- V1基础表，V2历史预约字段，V3评分统计，V4历史位置表，V5交易快照、支付、退款、库存流水。不得改写已执行的V1～V4。
+- V1基础表，V2历史预约字段，V3评分统计，V4历史位置表，V5交易快照、支付、退款、库存流水。V6统一商家商品表和字段，V7标记支付渠道。不得改写已执行的V1～V5。
 - 升级前备份，并在旧版结清 `SELECT id,status FROM orders WHERE status NOT IN (4,5)` 查出的历史活动订单。V5约束拒绝未结清数据，不能把旧待取餐状态3解释为商城已发货。
 - MySQL DDL不整体回滚；失败后核对实际结构和Flyway记录，必要时恢复备份，不盲目重跑。历史订单不虚构支付记录、不支持新退款流程。

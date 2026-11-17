@@ -14,7 +14,7 @@ export default {
         <p class="pill">{{ stateText(state.order.status) }}</p>
         <p>支付截止：{{ state.order.expiresAt }}</p>
         <p>收货信息：{{ state.order.shippingAddress }}</p>
-        <p v-for="item in state.order.items" :key="item.id">{{ item.dishName }} × {{ item.quantity }}</p>
+        <p v-for="item in state.order.items" :key="item.id">{{ item.productName }} × {{ item.quantity }}</p>
         <p>商品 {{ money(state.order.goodsAmount) }} · 运费 {{ money(state.order.freightAmount) }}</p>
         <p>应付 {{ money(state.order.totalAmount) }}</p>
         <div class="actions">
@@ -48,10 +48,11 @@ export default {
     // 买家：待支付可创建支付单/取消，已支付可退款，已发货可确认收货；商家：已支付可发货。
     const BUYER_ACTIONS = {
       0: [
-        { key: 'payments', label: '创建支付单' },
+        { key: 'payments', label: '支付宝付款' },
         { key: 'cancel', label: '取消订单' },
       ],
       1: [{ key: 'refund', label: '整单退款' }],
+      7: [{ key: 'refund', label: '重试退款' }],
       3: [{ key: 'receive', label: '确认收货' }],
     };
 

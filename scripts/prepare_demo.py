@@ -72,15 +72,15 @@ def main():
 
     prefix = 'show' + secrets.token_hex(3)
 
-    def account(suffix, nickname, role, restaurant=None):
+    def account(suffix, nickname, role, merchant=None):
         entry = dict(username=prefix + suffix, password=secrets.token_urlsafe(12),
-                     nickname=nickname, role=role, restaurantId=restaurant)
+                     nickname=nickname, role=role, merchantId=merchant)
         state['accounts'].append(entry)
         save()
         user = api('POST', '/users/register', dict(username=entry['username'], password=entry['password'],
             nickname=nickname, phone='1' + ''.join(secrets.choice('0123456789') for _ in range(10))))
         entry['userId'] = user['id']
-        sql(f"UPDATE user SET role='{role}',restaurant_id={restaurant if restaurant else 'NULL'} "
+        sql(f"UPDATE user SET role='{role}',merchant_id={merchant if merchant else 'NULL'} "
             f"WHERE id={int(user['id'])} AND username='{entry['username']}' AND role='USER';")
         save()
         return api('POST', '/users/login', dict(username=entry['username'], password=entry['password']))['token']
@@ -88,7 +88,7 @@ def main():
     account('a', '运营管理员', 'ADMIN')
     account('u', '林同学', 'USER')
     for i, (name, description, address, products) in enumerate(SHOPS):
-        shop = int(sql(f"INSERT INTO restaurant(name,description,address,status) VALUES("
+        shop = int(sql(f"INSERT INTO merchant(name,description,address,status) VALUES("
                        f"{text(name)},{text(description)},{text(address)},1); SELECT LAST_INSERT_ID();"))
         shop_state = dict(id=shop, name=name, products=[])
         state['shops'].append(shop_state)
@@ -99,15 +99,15 @@ def main():
             shop_state['products'].append(dict(id=product, name=name, price=price))
             save()
     if args.hide_smoke:
-        rows = sql("SELECT id FROM restaurant WHERE status=1 AND name REGEXP '^(Trade smoke |Smoke campus |Updated campus )';")
+        rows = sql("SELECT id FROM merchant WHERE status=1 AND name REGEXP '^(Trade smoke |Smoke campus |Updated campus )';")
         ids = [int(value) for value in rows.split()] if rows else []
         state['hidden_shop_ids'] = ids
         save()
         if ids:
             values = ','.join(map(str, ids))
-            sql(f"START TRANSACTION; UPDATE restaurant SET status=0 WHERE id IN ({values}); "
+            sql(f"START TRANSACTION; UPDATE merchant SET status=0 WHERE id IN ({values}); "
                 "INSERT INTO outbox_event(event_id,event_type,aggregate_id,payload,status,retry_count) "
-                f"SELECT UUID(),'RESTAURANT_CACHE_EVICT',id,CAST(id AS CHAR),'PENDING',0 FROM restaurant WHERE id IN ({values}); COMMIT;")
+                f"SELECT UUID(),'MERCHANT_CACHE_EVICT',id,CAST(id AS CHAR),'PENDING',0 FROM merchant WHERE id IN ({values}); COMMIT;")
     state['complete'] = True
     save()
     guide = ['# 本地演示账号', '', '入口：' + args.base, '', '以下为本次创建的专用演示账号，请勿用于正式环境。', '', '| 角色 | 名称 | 用户名 | 密码 |', '|---|---|---|---|']

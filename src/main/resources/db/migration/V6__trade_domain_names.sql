@@ -1,0 +1,23 @@
+-- Run during maintenance with application writers stopped. Preserve V1-V5 checksums.
+RENAME TABLE restaurant TO merchant, dish TO product;
+ALTER TABLE user RENAME COLUMN restaurant_id TO merchant_id;
+ALTER TABLE product DROP FOREIGN KEY fk_dish_restaurant;
+ALTER TABLE product RENAME COLUMN restaurant_id TO merchant_id;
+ALTER TABLE product ADD CONSTRAINT fk_product_merchant FOREIGN KEY (merchant_id) REFERENCES merchant(id);
+ALTER TABLE orders DROP FOREIGN KEY fk_order_restaurant;
+ALTER TABLE orders RENAME COLUMN restaurant_id TO merchant_id;
+ALTER TABLE orders ADD CONSTRAINT fk_order_merchant FOREIGN KEY (merchant_id) REFERENCES merchant(id);
+ALTER TABLE review DROP FOREIGN KEY fk_review_restaurant;
+ALTER TABLE review RENAME COLUMN restaurant_id TO merchant_id;
+ALTER TABLE review ADD CONSTRAINT fk_review_merchant FOREIGN KEY (merchant_id) REFERENCES merchant(id);
+ALTER TABLE pickup_slot DROP FOREIGN KEY fk_slot_restaurant;
+ALTER TABLE pickup_slot RENAME COLUMN restaurant_id TO merchant_id;
+ALTER TABLE pickup_slot ADD CONSTRAINT fk_slot_merchant FOREIGN KEY (merchant_id) REFERENCES merchant(id);
+ALTER TABLE cart_item DROP FOREIGN KEY fk_cart_dish;
+ALTER TABLE cart_item RENAME COLUMN dish_id TO product_id;
+ALTER TABLE cart_item ADD CONSTRAINT fk_cart_product FOREIGN KEY (product_id) REFERENCES product(id);
+ALTER TABLE order_item DROP FOREIGN KEY fk_order_item_dish;
+ALTER TABLE order_item RENAME COLUMN dish_id TO product_id;
+ALTER TABLE order_item ADD CONSTRAINT fk_order_item_product FOREIGN KEY (product_id) REFERENCES product(id);
+ALTER TABLE order_item RENAME COLUMN dish_name TO product_name;
+UPDATE outbox_event SET event_type='MERCHANT_CACHE_EVICT' WHERE event_type='RESTAURANT_CACHE_EVICT';

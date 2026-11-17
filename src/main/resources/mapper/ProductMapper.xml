@@ -3,14 +3,14 @@
         PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
         "https://mybatis.org/dtd/mybatis-3-mapper.dtd">
 
-<mapper namespace="com.dianping.mapper.ProductMapper">
+<mapper namespace="com.trade.mapper.ProductMapper">
 
     <select id="selectMerchantProductsPage"
-            resultType="com.dianping.entity.Product">
+            resultType="com.trade.entity.Product">
 
         SELECT *
-        FROM dish
-        WHERE restaurant_id = #{restaurantId}
+        FROM product
+        WHERE merchant_id = #{merchantId}
         AND deleted = 0
 
         <if test="status != null">
@@ -27,8 +27,8 @@
             resultType="java.lang.Long">
 
         SELECT COUNT(*)
-        FROM dish
-        WHERE restaurant_id = #{restaurantId}
+        FROM product
+        WHERE merchant_id = #{merchantId}
         AND deleted = 0
 
         <if test="status != null">

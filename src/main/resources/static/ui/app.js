@@ -7,20 +7,18 @@ import FormModal from './components/FormModal.js';
 import LoginDialog from './components/LoginDialog.js';
 import OrderDialog from './components/OrderDialog.js';
 import Browse from './views/Browse.js';
-import Stall from './views/Stall.js';
+import Shop from './views/Shop.js';
 import Cart from './views/Cart.js';
 import Orders from './views/Orders.js';
 import Merchant from './views/Merchant.js';
-import Admin from './views/Admin.js';
 
 const VIEWS = {
   browse: Browse,
-  stall: Stall,
+  shop: Shop,
   cart: Cart,
   orders: Orders,
   'merchant-orders': Orders,
   merchant: Merchant,
-  admin: Admin,
 };
 
 const VIEW_ROLES = { merchant: 'MERCHANT', 'merchant-orders': 'MERCHANT', admin: 'ADMIN' };
@@ -35,7 +33,7 @@ const App = {
         <a v-for="link in navLinks" :key="link.name" :href="'#/' + link.name"
            :class="{ active: route.name === link.name }">{{ link.label }}</a>
       </nav>
-      <p class="aside-note">选购商品，查看订单。<br>支付为演示流程，无真实扣款。</p>
+      <p class="aside-note">选购商品，查看订单。<br>支持支付宝付款。</p>
     </aside>
     <main>
       <header>
@@ -55,7 +53,7 @@ const App = {
         <div v-if="guardMessage" class="empty">{{ guardMessage }}</div>
         <component v-else :is="activeView" :key="viewKey" v-bind="viewProps"></component>
       </section>
-      <footer>商品交易平台 · 支付为流程演示，无真实扣款</footer>
+      <footer>商品交易平台 · 支付宝安全支付</footer>
     </main>
     <FormModal></FormModal>
     <LoginDialog></LoginDialog>
@@ -75,7 +73,6 @@ const App = {
         links.push({ name: 'merchant-orders', label: '商家订单' });
         links.push({ name: 'merchant', label: '商家工作台' });
       }
-      if (currentRole() === 'ADMIN') links.push({ name: 'admin', label: '管理员工作台' });
       return links;
     });
 
@@ -100,7 +97,7 @@ const App = {
 
     const activeView = computed(() => VIEWS[route.name] || Browse);
     const viewProps = computed(() => {
-      if (route.name === 'stall') return { id: String(route.params.id) };
+      if (route.name === 'shop') return { id: String(route.params.id) };
       if (route.name === 'merchant-orders') return { merchant: true };
       return {};
     });
@@ -125,7 +122,7 @@ const App = {
     };
 
     const pageTitle = computed(() => currentRole() === 'ADMIN' ? '管理员工作台' : currentRole() === 'MERCHANT' ? '商家经营管理' : '选购所需商品');
-    const pageDescription = computed(() => currentRole() === 'ADMIN' ? '查看待付款订单，确认模拟付款。' : currentRole() === 'MERCHANT' ? '管理商品与库存，处理订单和发货。' : '浏览商家商品，查看订单与履约状态。');
+    const pageDescription = computed(() => currentRole() === 'ADMIN' ? '查看商品与交易订单。' : currentRole() === 'MERCHANT' ? '管理商品与库存，处理订单和发货。' : '浏览商家商品，查看订单与履约状态。');
     const busyText = 'false';
 
     return { pageTitle, pageDescription, session, route, notice, navLinks, identity, guardMessage, activeView, viewProps, viewKey, busyText, openLogin, logout };

@@ -20,7 +20,7 @@ exec 9>"$WORK/deploy.lock"
 flock -w 1200 9
 mkdir -p "$STAGE"
 tar -xzf "$WORK/incoming/$RELEASE_ID.tgz" -C "$STAGE"
-test -s "$STAGE/target/dianping-0.0.1-SNAPSHOT.jar"
+test -s "$STAGE/target/trade-store-0.0.1-SNAPSHOT.jar"
 
 compose() {
   sudo -n docker compose -p campus-server --env-file "$PROJECT/.env.server" \

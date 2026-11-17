@@ -20,7 +20,7 @@ export default {
       <div v-else-if="!records.length" class="empty">没有找到商家，试试其他关键词。</div>
       <template v-else>
         <div class="grid">
-          <article v-for="item in records" :key="item.id" class="stall">
+          <article v-for="item in records" :key="item.id" class="shop">
             <div class="mark">商</div>
             <h3>{{ item.name }}</h3>
             <p>{{ item.description || '查看商品，便捷下单' }}</p>
@@ -42,7 +42,7 @@ export default {
     const load = async () => {
       state.loading = true;
       try {
-        const result = await api.searchRestaurants({
+        const result = await api.searchMerchants({
           keyword: state.keyword,
           sort: state.sort,
           page: state.page,
@@ -67,7 +67,7 @@ export default {
       load();
     };
 
-    const open = id => navigate('stall', { id });
+    const open = id => navigate('shop', { id });
 
     onMounted(load);
     return { ...toRefs(state), search, turn, open };

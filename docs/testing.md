@@ -4,15 +4,15 @@
 
 | 文件 | 验证目标 |
 |---|---|
-| src/test/java/com/dianping/service/TradeOrderIT.java | 真实MySQL并发、支付退款和事务回滚 |
-| src/test/java/com/dianping/security/SecurityIntegrationTest.java | JWT与角色授权、参数与错误HTTP语义 |
-| src/test/java/com/dianping/util/JwtUtilTest.java | JWT解析、并发使用等当前鉴权逻辑 |
-| src/test/java/com/dianping/service/RestaurantServiceTest.java | 当前Redis命中、回源与异常降级 |
-| src/test/java/com/dianping/service/ReviewServiceTest.java | 当前保留的订单评价逻辑 |
-| src/test/java/com/dianping/config/SchedulingConfigTest.java | MQ投递阻塞时不阻塞订单恢复线程 |
-| scripts/smoke_trade.py | 双实例HTTP下单、回调权限、退款库存、发货收货闭环 |
+| src/test/java/com/trade/service/TradeOrderIT.java | 真实MySQL并发、支付退款和事务回滚 |
+| src/test/java/com/trade/security/SecurityIntegrationTest.java | JWT与角色授权、参数与错误HTTP语义 |
+| src/test/java/com/trade/util/JwtUtilTest.java | JWT解析、并发使用等当前鉴权逻辑 |
+| src/test/java/com/trade/service/MerchantServiceTest.java | 当前Redis命中、回源与异常降级 |
+| src/test/java/com/trade/service/ReviewServiceTest.java | 当前保留的订单评价逻辑 |
+| src/test/java/com/trade/config/SchedulingConfigTest.java | MQ投递阻塞时不阻塞订单恢复线程 |
+| scripts/smoke_trade.py | 双实例HTTP下单幂等、取消与库存恢复；不触发真实支付 |
 
-旧预约/GEO/本地缓存广播测试已退出；旧校园压测及其伪HTTP服务测试已删除。保留的测试不因文件名仍含Restaurant或Review就被视为过期。
+旧预约/GEO/本地缓存广播测试已退出；旧校园压测及其伪HTTP服务测试已删除。保留的测试不因文件名仍含Merchant或Review就被视为过期。
 
 ## 运行
 
@@ -41,11 +41,11 @@ docker compose -f compose.campus.yml down
 | sameKeyAndCartAreIdempotent | 并发同键只生成一单；地址冲突拒绝；新键不能重买已清空购物车 |
 | callbackChecksAmountAndDeduplicates | 错金额不付款；并发相同回调仅一次生效；不同流水拒绝 |
 | paymentAndCancellationHaveOneWinner | 支付/取消竞争后，订单、支付状态与库存相互一致 |
-| expiredOrderCannotPayAndReleasesOnce | 截止后拒付；并发超时只恢复一次库存 |
+| expiredOrderCannotPayAndReleasesOnce | 截止后拒绝新支付链接；并发超时只恢复一次库存 |
 | refundIsFullAndIdempotent | 并发退款只有一条退款记录，库存恢复；旧回调不复活订单 |
 | shipAndRefundHaveOneWinner | 发货与退款只能有一种结果，库存与结果一致 |
 | fulfillmentChecksOwnership | 拒绝其他商家发货/其他用户收货；发货后拒绝退款 |
-| movementFailureRollsBackEntireRefund | 流水写入失败，支付、退款、订单及库存一起回滚 |
+| movementFailureLeavesDurableRefundForRecovery | 流水写入失败后保留退款处理中状态，可重试完成本地落账 |
 | outboxFailureRollsBackOrderStockAndCart | 事件写入失败，订单不落库，库存与购物车不变 |
 | adjustmentIsOwnedIdempotentAndCannotGoNegative | 增补库存幂等、不同数量同键拒绝、越权和负库存拒绝 |
 
@@ -58,8 +58,8 @@ docker compose -f compose.campus.yml down
 
 ## 本地功能演示
 
-启动现有Compose环境后，首次执行 `python scripts/prepare_demo.py --environment local --base http://127.0.0.1:18080 --hide-smoke` 创建三家店铺、12道菜品与5个专用账号。账号保存在 `.sandbox-tmp/demo/accounts.md`（Git忽略），已有该文件时不要反复初始化。店铺与价格为演示设定，不代表真实经营信息。
+启动现有Compose环境后，首次执行 `python scripts/prepare_demo.py --environment local --base http://127.0.0.1:18080 --hide-smoke` 创建三家店铺、12件商品与5个专用账号。账号保存在 `.sandbox-tmp/demo/accounts.md`（Git忽略），已有该文件时不要反复初始化。店铺与价格为演示设定，不代表真实经营信息。
 
-买家浏览商品、加购物车、填写地址下单，在订单详情创建支付单；管理员登录自动进入工作台，刷新待付款、选择并确认；对应商家在商家订单发货，买家确认收货。退款用另一张已付款未发货订单展示。商家工作台还支持编辑、上下架、库存调整与流水。
+买家下单后在订单详情点击支付宝付款。先配置支付宝沙箱并完成支付，通知成功后商家发货、买家收货；退款在未发货时发起。未配置支付参数时无法付款。
 
 账号和数据仅初始化在所选环境；本地数据不会因推送代码自动同步到服务器。服务入口为 http://localhost:18080 。

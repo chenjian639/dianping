@@ -18,14 +18,14 @@
 | POST | /users/login | 公开 | username、password；返回含token的登录信息 |
 | GET | /users/me | 登录 | 当前用户 |
 | GET | /users/{id} | 本人 | 用户信息，不可查询他人 |
-| GET | /restaurants/search | 公开 | keyword、sort=latest/rating/reviews、page、pageSize |
-| GET | /restaurants | 登录 | 营业商家列表 |
-| GET | /restaurants/{id} | 登录 | 商家详情与评分 |
-| GET | /restaurants/{id}/products | 登录 | 上架且未删除商品 |
-| PUT | /merchant/restaurant | MERCHANT | name必填≤100；description、address≤255 |
-| PUT | /merchant/restaurant/status | MERCHANT | status：0休息、1营业 |
+| GET | /merchants/search | 公开 | keyword、sort=latest/rating/reviews、page、pageSize |
+| GET | /merchants | 登录 | 营业商家列表 |
+| GET | /merchants/{id} | 登录 | 商家详情与评分 |
+| GET | /merchants/{id}/products | 登录 | 上架且未删除商品 |
+| PUT | /merchant/profile | MERCHANT | name必填≤100；description、address≤255 |
+| PUT | /merchant/profile/status | MERCHANT | status：0休息、1营业 |
 
-公开注册不能选择角色。商家归属从JWT绑定的restaurantId读取，不接受调用者指定其他商家。
+公开注册不能选择角色。商家归属从JWT绑定的merchantId读取，不接受调用者指定其他商家。
 
 ## 商品与库存
 
@@ -54,59 +54,32 @@
 | 方法 | 路径 | 参数/语义 |
 |---|---|---|
 | GET | /cart | 本人购物车 |
-| POST | /cart/items | dishId、quantity；加入或累加 |
+| POST | /cart/items | productId、quantity；加入或累加 |
 | PUT | /cart/items/{id} | quantity；设置数量，id是购物车项ID |
 | DELETE | /cart/items/{id} | 删除本人购物车项 |
 
-需登录。数量为正整数并校验商品库存；一个购物车只能有同一商家商品。`dishId`/`dishName`是历史兼容字段，含义是商品ID/名称；不能替换为未经实现的productId请求字段。
+需登录。数量为正整数并校验商品库存；一个购物车只能有同一商家商品。商品字段统一为 `productId` / `productName`。
 
 ## 订单、支付和履约
 
-| 方法 | 路径 | 权限 | 参数/结果 |
-|---|---|---|---|
-| POST | /orders/create | 登录 | requestId、shippingAddress；返回订单ID |
-| GET | /orders | 登录 | 本人订单分页，page、pageSize |
-| GET | /orders/{id} | 本人 | 金额、地址、截止时间、状态、明细 |
-| POST | /orders/{id}/payments | 本人 | 无请求体；创建或返回已有支付单 |
-| POST | /admin/mock-payments/{id}/callback | ADMIN | id为支付单ID；channelReference、amount |
-| PUT | /orders/{id}/cancel | 本人 | 取消待支付订单并恢复库存 |
-| POST | /orders/{id}/refund | 本人 | 无请求体；发货前整单退款 |
-| PUT | /orders/{id}/receive | 本人 | 确认已发货订单收货 |
-| GET | /merchant/orders | MERCHANT | 自己订单，page、pageSize、可选status |
-| GET | /merchant/orders/{id} | 所属MERCHANT | 订单详情 |
-| PUT | /merchant/orders/{id}/ship | 所属MERCHANT | 已支付订单发货，无请求体 |
+| 方法 | 路径 | 语义 |
+| --- | --- | --- |
+| POST | /orders/create | requestId、shippingAddress；整车结算，返回订单 ID |
+| GET | /orders | 本人订单分页 |
+| GET | /orders/{id} | 本人订单详情 |
+| POST | /orders/{id}/payments | 返回 `{paymentUrl}`，浏览器跳转支付宝；不代表已付款 |
+| POST | /payments/alipay/notify | 支付宝表单异步通知，无 JWT，必须通过 RSA2 验签；返回纯文本 success/failure |
+| PUT | /orders/{id}/cancel | 待支付订单取消；先核对并关闭支付宝交易 |
+| POST | /orders/{id}/refund | 已支付未发货整单退款，支持状态 7 重试 |
+| PUT | /orders/{id}/receive | 已发货订单确认收货 |
+| GET | /merchant/orders | 商家订单分页 |
+| GET | /merchant/orders/{id} | 自己商家的订单详情 |
+| PUT | /merchant/orders/{id}/ship | 已支付订单发货 |
 
-下单requestId非空≤64、shippingAddress非空≤500。金额由服务端计算，运费固定0。回调channelReference非空≤64，amount≥0.01、最多两位小数且必须等于支付单金额。
+状态：0 待支付、1 已支付、2 历史状态、3 已发货、4 已完成、5 已取消、6 已退款、7 退款处理中。
+下单按数据库价格计算，免运费，扣库存，30 分钟支付期限。相同用户与 requestId 幂等，地址不一致拒绝。
+支付宝回调可延迟到达，因此取消前以渠道状态核对。回跳不能作为支付凭据。详见 [支付宝接入](alipay.md)。
 
-### 一次完整交易
+## 评价
 
-1. `POST /cart/items`：`{"dishId":1,"quantity":2}`。
-2. `POST /orders/create`：`{"requestId":"checkout-001","shippingAddress":"张三 13800000000 上海市示例地址"}`。保存返回的订单ID。
-3. `POST /orders/{订单ID}/payments`，返回字段id、orderId、amount、status、channelReference。这里的id为支付单ID。
-4. 管理员 `POST /admin/mock-payments/{支付单ID}/callback`：`{"channelReference":"mock-001","amount":24.00}`。示例金额须换成实际支付单金额。
-5. 商家 `PUT /merchant/orders/{订单ID}/ship`，买家 `PUT /orders/{订单ID}/receive`。
-6. 或在发货前，买家 `POST /orders/{订单ID}/refund`。已发货不可退款。
-
-### 重试和错误边界
-
-- 同用户、同下单键、同地址返回原订单；换地址复用同键拒绝，不比较当前购物车。
-- 相同支付回调幂等；金额错误或已使用不同渠道流水拒绝。已退款后的同一历史成功回调不会恢复订单。
-- 关单后或超过支付截止时间的未确认付款拒绝。本地没有真实到账，不能用于真实支付渠道。
-- 已退款再次退款、已收货再次确认成功返回；重复取消/发货返回业务错误。
-- 创建支付单不代表支付成功，也不延长截止时间；已存在的支付单可能已成功、已退款或关联已关闭订单。
-- 0待支付、1已支付、3已发货、4已完成、5已取消、6已退款；2仅为历史状态。
-
-## 保留功能与运维
-
-| 方法 | 路径 | 参数/权限 |
-|---|---|---|
-| POST | /reviews | 本人已完成订单；orderId、rating(1～5)、content；每单一次 |
-| GET | /reviews/me | 本人评价，page、pageSize |
-| GET | /restaurants/{id}/reviews | 登录；page、pageSize |
-| GET | /restaurants/{id}/review-summary | 登录；评分统计 |
-| POST | /admin/cache-recovery/start | ADMIN，启动缓存死信恢复 |
-| POST | /admin/cache-recovery/stop | ADMIN，停止缓存死信恢复 |
-| GET | /actuator/health/liveness | 公开，存活探针 |
-| GET | /actuator/health/readiness | 公开，依赖就绪探针 |
-
-旧预约、GEO、核销和直接 `/orders/{id}/pay` 接口已移除。完整字段类型以当前DTO/VO及生成的OpenAPI为准。
+评价接口保持原有能力：仅本人已完成订单可评价，一单一次；商家统计与缓存失效事件在事务内更新。

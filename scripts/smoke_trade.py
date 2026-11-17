@@ -54,38 +54,24 @@ def wait_ready():
 def run():
     wait_ready()
     prefix=uuid.uuid4().hex[:8]
-    sql("INSERT INTO restaurant(name,status) VALUES('Trade smoke " + prefix + "',1);")
-    merchant=int(sql("SELECT id FROM restaurant WHERE name='Trade smoke " + prefix + "'"))
+    sql("INSERT INTO merchant(name,status) VALUES('Trade smoke " + prefix + "',1);")
+    merchant=int(sql("SELECT id FROM merchant WHERE name='Trade smoke " + prefix + "'"))
     tokens=[]
     for i,role in enumerate(('MERCHANT','ADMIN','USER')):
         username='t'+prefix+str(i)
         api('POST','/users/register',dict(username=username,password='TradeSmoke123',nickname=username,phone='1'+str(random.randrange(10**9,10**10))))
-        sql(f"UPDATE user SET role='{role}',restaurant_id={merchant if role=='MERCHANT' else 'NULL'} WHERE username='{username}'")
+        sql(f"UPDATE user SET role='{role}',merchant_id={merchant if role=='MERCHANT' else 'NULL'} WHERE username='{username}'")
         tokens.append(api('POST','/users/login',dict(username=username,password='TradeSmoke123'))['token'])
     seller,admin,buyer=tokens
     product=api('POST','/merchant/products',dict(name='Test product',description='Smoke fixture',price=12,stock=2),seller)
-    api('POST','/cart/items',dict(dishId=product,quantity=1),buyer)
+    api('POST','/cart/items',dict(productId=product,quantity=1),buyer)
     body=dict(requestId=prefix,shippingAddress='Test receiver 13800000000 Test address')
     order=api('POST','/orders/create',body,buyer)
     assert api('POST','/orders/create',body,buyer,base=BASES[1])==order
-    payment=api('POST',f'/orders/{order}/payments',token=buyer)
-    callback=dict(channelReference='smoke-'+prefix,amount=12)
-    api('POST',f"/admin/mock-payments/{payment['id']}/callback",callback,buyer,expected=403)
-    api('POST',f"/admin/mock-payments/{payment['id']}/callback",callback,admin)
-    api('POST',f"/admin/mock-payments/{payment['id']}/callback",callback,admin,base=BASES[1])
-    api('POST',f'/orders/{order}/refund',token=buyer)
-    api('POST',f'/orders/{order}/refund',token=buyer,base=BASES[1])
-    assert api('GET',f'/orders/{order}',token=buyer)['status']==6
-    assert int(sql(f'SELECT stock FROM dish WHERE id={product}'))==2
-    api('POST','/cart/items',dict(dishId=product,quantity=1),buyer)
-    second=api('POST','/orders/create',dict(requestId=prefix+'-2',shippingAddress='Test address'),buyer)
-    payment=api('POST',f'/orders/{second}/payments',token=buyer)
-    api('POST',f"/admin/mock-payments/{payment['id']}/callback",dict(channelReference='ship-'+prefix,amount=12),admin)
-    api('PUT',f'/merchant/orders/{second}/ship',token=seller)
-    api('POST',f'/orders/{second}/refund',token=buyer,expected=400)
-    api('PUT',f'/orders/{second}/receive',token=buyer)
-    assert api('GET',f'/orders/{second}',token=buyer)['status']==4
-    print('PASS: two-instance order, payment permissions, duplicate callback, refund, inventory and fulfillment')
+    api('PUT',f'/orders/{order}/cancel',token=buyer)
+    assert api('GET',f'/orders/{order}',token=buyer)['status']==5
+    assert int(sql(f'SELECT stock FROM product WHERE id={product}'))==2
+    print('PASS: two-instance order idempotency, cancellation and inventory; payment requires Alipay sandbox acceptance')
 
 if __name__=='__main__':
     run()

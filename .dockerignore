@@ -5,6 +5,6 @@
 .env.server
 .sandbox-tmp
 target/*
-!target/dianping-0.0.1-SNAPSHOT.jar
+!target/trade-store-0.0.1-SNAPSHOT.jar
 docs
 interview-notes/

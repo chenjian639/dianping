@@ -14,22 +14,22 @@ export default {
         <button type="button" @click="goOrders">处理订单</button>
         <button type="button" @click="create">新增商品</button>
         <button type="button" @click="editProfile">编辑商家资料</button>
-        <button type="button" @click="toggleRestaurant">{{ restaurant && restaurant.status ? '暂停营业' : '恢复营业' }}</button>
+        <button type="button" @click="toggleMerchant">{{ merchant && merchant.status ? '暂停营业' : '恢复营业' }}</button>
       </div>
       <div v-if="loading" class="empty">正在加载商品…</div>
       <div v-else-if="!products.length" class="empty">新增商品后，买家即可在商家中查看。</div>
       <template v-else>
-        <div v-for="dish in products" :key="dish.id" class="row">
+        <div v-for="product in products" :key="product.id" class="row">
           <div>
-            <h3>{{ dish.name }}</h3>
-            <p>{{ money(dish.price) }} · 库存 {{ dish.stock }} · {{ dish.status ? '已上架' : '已下架' }}</p>
+            <h3>{{ product.name }}</h3>
+            <p>{{ money(product.price) }} · 库存 {{ product.stock }} · {{ product.status ? '已上架' : '已下架' }}</p>
           </div>
           <div class="actions">
-            <button type="button" :disabled="busy" @click="adjust(dish)">调整库存</button>
-            <button type="button" :disabled="busy" @click="showHistory(dish)">库存流水</button>
-            <button type="button" :disabled="busy" @click="edit(dish)">编辑</button>
-            <button type="button" :disabled="busy" @click="toggle(dish)">{{ dish.status ? '下架' : '上架' }}</button>
-            <button type="button" :disabled="busy" @click="remove(dish)">删除</button>
+            <button type="button" :disabled="busy" @click="adjust(product)">调整库存</button>
+            <button type="button" :disabled="busy" @click="showHistory(product)">库存流水</button>
+            <button type="button" :disabled="busy" @click="edit(product)">编辑</button>
+            <button type="button" :disabled="busy" @click="toggle(product)">{{ product.status ? '下架' : '上架' }}</button>
+            <button type="button" :disabled="busy" @click="remove(product)">删除</button>
           </div>
         </div>
       </template>
@@ -51,17 +51,17 @@ export default {
     </div>
   `,
   setup() {
-    const state = reactive({ products: [], restaurant: null, loading: true, busy: false, movements: [], historyName: '', historyOpen: false });
+    const state = reactive({ products: [], merchant: null, loading: true, busy: false, movements: [], historyName: '', historyOpen: false });
     const historyEl = ref(null);
 
-    const restaurantId = () => session.claims.restaurantId;
+    const merchantId = () => session.claims.merchantId;
 
     const load = async () => {
       state.loading = true;
       try {
         const result = await api.merchantProducts(1, 100);
         state.products = result.records || [];
-        if (restaurantId()) state.restaurant = await api.restaurant(restaurantId()).catch(() => null);
+        if (merchantId()) state.merchant = await api.merchant(merchantId()).catch(() => null);
       } catch (e) {
         notify(e.message, true);
       } finally {
@@ -88,26 +88,26 @@ export default {
       });
     };
 
-    const edit = dish => {
+    const edit = product => {
       openForm({
         title: '编辑商品',
         fields: [
-          { name: 'name', label: '商品名称', type: 'text', value: dish.name, attrs: { required: true } },
-          { name: 'description', label: '描述', type: 'text', value: dish.description || '' },
-          { name: 'price', label: '单价', type: 'number', value: dish.price, attrs: { required: true, min: '0.01', step: '0.01' } },
+          { name: 'name', label: '商品名称', type: 'text', value: product.name, attrs: { required: true } },
+          { name: 'description', label: '描述', type: 'text', value: product.description || '' },
+          { name: 'price', label: '单价', type: 'number', value: product.price, attrs: { required: true, min: '0.01', step: '0.01' } },
         ],
         onSubmit: async values => {
-          await api.updateProduct(dish.id, { ...values, price: Number(values.price) });
+          await api.updateProduct(product.id, { ...values, price: Number(values.price) });
           await load();
           notify('操作成功');
         },
       });
     };
 
-    const toggle = async dish => {
+    const toggle = async product => {
       state.busy = true;
       try {
-        await api.updateProductStatus(dish.id, dish.status ? 0 : 1);
+        await api.updateProductStatus(product.id, product.status ? 0 : 1);
         await load();
       } catch (e) {
         notify(e.message, true);
@@ -116,11 +116,11 @@ export default {
       }
     };
 
-    const remove = async dish => {
-      if (!window.confirm('确认删除商品「' + dish.name + '」？删除后买家不可再见。')) return;
+    const remove = async product => {
+      if (!window.confirm('确认删除商品「' + product.name + '」？删除后买家不可再见。')) return;
       state.busy = true;
       try {
-        await api.deleteProduct(dish.id);
+        await api.deleteProduct(product.id);
         await load();
         notify('操作成功');
       } catch (e) {
@@ -130,26 +130,26 @@ export default {
       }
     };
 
-    const adjust = dish => {
+    const adjust = product => {
       openForm({
         title: '调整库存',
         fields: [{ name: 'delta', label: '增加数量（负数为减少）', type: 'number', attrs: { required: true, step: 1 } }],
         onSubmit: async values => {
-          await api.adjustInventory(dish.id, randomId(), Number(values.delta));
+          await api.adjustInventory(product.id, randomId(), Number(values.delta));
           await load();
           notify('操作成功');
         },
       });
     };
 
-    const showHistory = async dish => {
-      state.historyName = dish.name;
+    const showHistory = async product => {
+      state.historyName = product.name;
       state.movements = [];
       state.historyOpen = true;
       const el = historyEl.value;
       if (el && !el.open) el.showModal();
       try {
-        state.movements = (await api.inventoryHistory(dish.id)) || [];
+        state.movements = (await api.inventoryHistory(product.id)) || [];
       } catch (e) {
         notify(e.message, true);
       }
@@ -162,7 +162,7 @@ export default {
     };
 
     const editProfile = () => {
-      const current = state.restaurant || {};
+      const current = state.merchant || {};
       openForm({
         title: '编辑商家资料',
         fields: [
@@ -171,19 +171,19 @@ export default {
           { name: 'address', label: '商家地址', type: 'text', value: current.address || '', attrs: { maxlength: 255 } },
         ],
         onSubmit: async values => {
-          await api.updateRestaurant(values);
-          state.restaurant = { ...current, ...values };
+          await api.updateMerchant(values);
+          state.merchant = { ...current, ...values };
           notify('操作成功');
         },
       });
     };
 
-    const toggleRestaurant = async () => {
-      const next = state.restaurant && state.restaurant.status ? 0 : 1;
+    const toggleMerchant = async () => {
+      const next = state.merchant && state.merchant.status ? 0 : 1;
       state.busy = true;
       try {
-        await api.updateRestaurantStatus(next);
-        state.restaurant = { ...state.restaurant, status: next };
+        await api.updateMerchantStatus(next);
+        state.merchant = { ...state.merchant, status: next };
         notify(next ? '已恢复营业' : '已暂停营业');
       } catch (e) {
         notify(e.message, true);
@@ -203,6 +203,6 @@ export default {
     );
 
     onMounted(load);
-    return { ...toRefs(state), historyEl, money, goOrders, create, edit, toggle, remove, adjust, showHistory, closeHistory, editProfile, toggleRestaurant };
+    return { ...toRefs(state), historyEl, money, goOrders, create, edit, toggle, remove, adjust, showHistory, closeHistory, editProfile, toggleMerchant };
   },
 };

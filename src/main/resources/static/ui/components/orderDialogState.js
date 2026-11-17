@@ -47,9 +47,10 @@ export async function runOrderAction(action) {
   try {
     if (action === 'payments') {
       const payment = await api.createPayment(id);
-      orderDialog.paymentInfo =
-        '支付单 #' + payment.id + '，金额 ¥' + Number(payment.amount).toFixed(2) +
-        '。请由管理员在「支付演示」中确认模拟付款，无真实扣款。';
+      const url = new URL(payment.paymentUrl);
+      if (url.protocol !== 'https:' || !['openapi.alipay.com', 'openapi-sandbox.dl.alipaydev.com'].includes(url.hostname))
+        throw new Error('无效的支付地址');
+      location.assign(url.href);
       return;
     }
     if (action === 'cancel') await api.cancelOrder(id);

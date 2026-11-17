@@ -1,5 +1,5 @@
 // 共享常量与小工具：订单状态文案、角色文案、金额格式、随机请求号。
-export const ORDER_STATES = ['待支付', '已支付', '历史制作中', '已发货', '已完成', '已取消', '已退款'];
+export const ORDER_STATES = ['待支付', '已支付', '历史制作中', '已发货', '已完成', '已取消', '已退款', '退款处理中'];
 
 export const ROLE_LABELS = { USER: '买家', MERCHANT: '商家', ADMIN: '管理员' };
 

@@ -45,15 +45,15 @@ export const api = {
   currentUser: () => request('/users/me'),
 
   // 商家与商品（公共）
-  searchRestaurants: params => request('/restaurants/search' + query(params)),
-  restaurant: id => request('/restaurants/' + id),
-  restaurantProducts: id => request('/restaurants/' + id + '/products'),
-  restaurantReviews: (id, params) => request('/restaurants/' + id + '/reviews' + query(params)),
-  reviewSummary: id => request('/restaurants/' + id + '/review-summary'),
+  searchMerchants: params => request('/merchants/search' + query(params)),
+  merchant: id => request('/merchants/' + id),
+  merchantProducts: id => request('/merchants/' + id + '/products'),
+  merchantReviews: (id, params) => request('/merchants/' + id + '/reviews' + query(params)),
+  reviewSummary: id => request('/merchants/' + id + '/review-summary'),
 
   // 购物车
   cart: () => request('/cart'),
-  addCartItem: (dishId, quantity) => request('/cart/items', { method: 'POST', body: { dishId, quantity } }),
+  addCartItem: (productId, quantity) => request('/cart/items', { method: 'POST', body: { productId, quantity } }),
   updateCartItem: (id, quantity) => request('/cart/items/' + id, { method: 'PUT', body: { quantity } }),
   deleteCartItem: id => request('/cart/items/' + id, { method: 'DELETE' }),
 
@@ -65,12 +65,9 @@ export const api = {
   receiveOrder: id => request('/orders/' + id + '/receive', { method: 'PUT' }),
   cancelOrder: id => request('/orders/' + id + '/cancel', { method: 'PUT' }),
 
-  // 支付（模拟支付无真实扣款）
+  // 支付宝电脑网站支付
   createPayment: orderId => request('/orders/' + orderId + '/payments', { method: 'POST' }),
   refundOrder: orderId => request('/orders/' + orderId + '/refund', { method: 'POST' }),
-  mockPaymentCallback: (id, body) =>
-    request('/admin/mock-payments/' + id + '/callback', { method: 'POST', body }),
-  pendingPayments: () => request('/admin/mock-payments'),
 
   // 商家工作台：订单
   merchantOrders: (page, pageSize, status) => request('/merchant/orders' + query({ page, pageSize, status })),
@@ -88,6 +85,6 @@ export const api = {
   inventoryHistory: id => request('/merchant/products/' + id + '/inventory'),
 
   // 商家工作台：商家资料
-  updateRestaurant: data => request('/merchant/restaurant', { method: 'PUT', body: data }),
-  updateRestaurantStatus: status => request('/merchant/restaurant/status', { method: 'PUT', body: { status } }),
+  updateMerchant: data => request('/merchant/profile', { method: 'PUT', body: data }),
+  updateMerchantStatus: status => request('/merchant/profile/status', { method: 'PUT', body: { status } }),
 };
